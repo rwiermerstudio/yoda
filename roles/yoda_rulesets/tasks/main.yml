@@ -175,3 +175,14 @@
   loop_control:
     loop_var: ruleset
   when: ruleset.install_scripts and 'icats' in group_names
+
+
+- name: Apply lazy ruleset imports performance patch
+  become_user: "{{ irods_service_account }}"
+  become: true
+  ansible.posix.patch:
+    src: "{{ playbook_dir }}/patches/yoda-ruleset-perf-lazy-imports.patch"
+    basedir: /etc/irods/yoda-ruleset
+    strip: 1
+  when: not ansible_check_mode
+  notify: Restart iRODS

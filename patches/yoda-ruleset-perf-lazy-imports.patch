@@ -1,0 +1,374 @@
+--- a/__init__.py	2026-11-25 16:13:35.540300557 +0000
++++ b/__init__.py	2026-11-26 09:04:25.282138124 +0000
+@@ -26,54 +26,328 @@
+ import sys
+ sys.path.extend([ '/etc/irods/rules_uu', '/etc/irods/rules_uu/util' ])
+ 
+-# Import all modules containing rules into the package namespace,
+-# so that they become visible to iRODS.
++# Eagerly import only policy/core modules required on every iRODS agent startup.
++# All other rule/API modules are lazily imported on first lookup via PEP 562 __getattr__.
++import importlib
+ 
+-from admin                    import *
+-from arb                      import *
+-from browse                   import *
+-from checksums                import *
+-from datacite                 import *
+-from exceptions               import *
+-from folder                   import *
+-from groups                   import *
+-from json_datacite            import *
+-from json_landing_page        import *
+-from mail                     import *
+-from meta                     import *
+-from meta_form                import *
+-from notifications            import *
+-from policies                 import *
+-from provenance               import *
+-from publication              import *
+-from publication_troubleshoot import *
+-from replication              import *
+-from research                 import *
+-from revisions                import *
+-from schema                   import *
+-from schema_transformation    import *
+-from schema_transformations   import *
+-from settings                 import *
+-from stats                    import *
+-from vault                    import *
+-from vault_deaccession        import *
+-from epic                     import *
++from policies import *
++from folder import *
++from replication import *
++from revisions import *
++from vault import *
++from api import api_stage_multipart_request_clear, api_stage_multipart_request_run, api_stage_multipart_request_submit
+ 
+-# Rules for handling multi-part API requests (see util/api.py).
+-from api                      import api_stage_multipart_request_clear, api_stage_multipart_request_run, api_stage_multipart_request_submit
+-
+-# Import certain modules only when enabled.
+ if config.enable_datarequest:
+     from datarequest import *
+ 
+-if config.enable_deposit:
+-    from deposit import *
++_LAZY_SYMBOL_TO_MODULE = {
++    'CollectionNotFoundException': 'exceptions',
++    'add_base_doi': 'publication',
++    'api_admin_has_access': 'admin',
++    'api_batch_troubleshoot_published_data_packages': 'publication_troubleshoot',
++    'api_browse_collections': 'browse',
++    'api_browse_folder': 'browse',
++    'api_deposit_copy_data_package': 'deposit',
++    'api_deposit_create': 'deposit',
++    'api_deposit_overview': 'deposit',
++    'api_deposit_status': 'deposit',
++    'api_deposit_submit': 'deposit',
++    'api_group_categories': 'groups',
++    'api_group_create': 'groups',
++    'api_group_data': 'groups',
++    'api_group_delete': 'groups',
++    'api_group_exists': 'groups',
++    'api_group_get_description': 'groups',
++    'api_group_get_user_role': 'groups',
++    'api_group_process_csv': 'groups',
++    'api_group_remove_user_from_group': 'groups',
++    'api_group_search_users': 'groups',
++    'api_group_subcategories': 'groups',
++    'api_group_update': 'groups',
++    'api_group_user_add': 'groups',
++    'api_group_user_is_member': 'groups',
++    'api_group_user_update_role': 'groups',
++    'api_load_text_obj': 'browse',
++    'api_meta_clone_file': 'meta',
++    'api_meta_form_load': 'meta_form',
++    'api_meta_form_save': 'meta_form',
++    'api_meta_remove': 'meta',
++    'api_notifications_dismiss': 'notifications',
++    'api_notifications_dismiss_all': 'notifications',
++    'api_notifications_load': 'notifications',
++    'api_provenance_log': 'provenance',
++    'api_research_collection_details': 'research',
++    'api_research_file_copy': 'research',
++    'api_research_file_delete': 'research',
++    'api_research_file_move': 'research',
++    'api_research_file_rename': 'research',
++    'api_research_folder_add': 'research',
++    'api_research_folder_copy': 'research',
++    'api_research_folder_delete': 'research',
++    'api_research_folder_move': 'research',
++    'api_research_folder_rename': 'research',
++    'api_research_list_temporary_files': 'research',
++    'api_research_manifest': 'research',
++    'api_research_system_metadata': 'research',
++    'api_resource_browse_group_data': 'stats',
++    'api_resource_category_stats': 'stats',
++    'api_resource_full_year_differentiated_group_storage': 'stats',
++    'api_resource_monthly_category_stats': 'stats',
++    'api_schema_get_schemas': 'schema',
++    'api_search': 'browse',
++    'api_settings_load': 'settings',
++    'api_settings_save': 'settings',
++    'api_token_delete': 'data_access_token',
++    'api_token_delete_expired': 'data_access_token',
++    'api_token_generate': 'data_access_token',
++    'api_token_load': 'data_access_token',
++    'api_transform_metadata': 'schema_transformation',
++    'api_vault_approve_deaccession': 'vault_deaccession',
++    'api_vault_archival_status': 'vault_archive',
++    'api_vault_archive': 'vault_archive',
++    'api_vault_cancel_deaccession': 'vault_deaccession',
++    'api_vault_deaccession_status': 'vault_deaccession',
++    'api_vault_extract': 'vault_archive',
++    'api_vault_request_deaccession': 'vault_deaccession',
++    'apply_data': 'groups',
++    'batch_troubleshoot_published_data_packages': 'publication_troubleshoot',
++    'check_combi_json': 'publication_troubleshoot',
++    'check_datacite_doi_registration': 'publication_troubleshoot',
++    'check_doi_availability': 'publication',
++    'check_landingpage': 'publication_troubleshoot',
++    'check_one_datacite_doi_reg': 'publication_troubleshoot',
++    'check_print_data_package_system_avus': 'publication_troubleshoot',
++    'cleanup_deaccession_cancel': 'vault_deaccession',
++    'collect_troubleshoot_data_packages': 'publication_troubleshoot',
++    'collection_has_cloneable_metadata': 'meta',
++    'compare_local_remote_landingpage': 'publication_troubleshoot',
++    'cooldown_passed': 'vault_deaccession',
++    'copy_landingpage_to_public_host': 'publication',
++    'copy_manifest_to_public_host': 'publication',
++    'copy_metadata_to_moai': 'publication',
++    'copy_user_metadata': 'meta',
++    'correctify_orcid': 'schema_transformation',
++    'create_archive': 'vault_archive',
++    'create_datacite_json': 'json_datacite',
++    'create_schema_org_json_ld': 'json_landing_page',
++    'deaccession_delete_original': 'vault_deaccession',
++    'deaccession_manifest_present': 'vault_deaccession',
++    'deaccession_provenance_present': 'vault_deaccession',
++    'deposit_create': 'deposit',
++    'execute_transformation': 'schema_transformation',
++    'extract_archive': 'vault_archive',
++    'filter_pregenerated_exportdata': 'stats',
++    'find_data_packages': 'publication_troubleshoot',
++    'find_full_package_path': 'publication_troubleshoot',
++    'folder_copy_check': 'research',
++    'folder_new_name_check': 'research',
++    'generate_combi_json': 'publication',
++    'generate_datacite_json': 'publication',
++    'generate_deaccession_manifest': 'vault_deaccession',
++    'generate_landing_page': 'publication',
++    'generate_manifest': 'publication',
++    'generate_random_id': 'notifications',
++    'generate_system_json': 'publication',
++    'generate_uuid': 'epic',
++    'get': 'schema_transformations',
++    'get_DOI': 'json_datacite',
++    'get_active_schema': 'schema',
++    'get_active_schema_id': 'schema',
++    'get_active_schema_path': 'schema',
++    'get_active_schema_uischema': 'schema',
++    'get_admins': 'admin',
++    'get_all_tokens': 'data_access_token',
++    'get_all_versions': 'publication',
++    'get_categories': 'groups',
++    'get_coll_lock': 'meta_form',
++    'get_coll_lock_count': 'meta_form',
++    'get_collection_metadata': 'publication',
++    'get_collection_metadata_path': 'meta',
++    'get_contributors': 'json_datacite',
++    'get_creators': 'json_datacite',
++    'get_datamanager_categories': 'groups',
++    'get_date_reference': 'stats',
++    'get_dates': 'json_datacite',
++    'get_deaccession_actor': 'vault_deaccession',
++    'get_deaccession_date': 'vault_deaccession',
++    'get_deaccession_reason': 'vault_deaccession',
++    'get_deaccessioned_packages_to_delete': 'vault_deaccession',
++    'get_descriptions': 'json_datacite',
++    'get_errors': 'datacite',
++    'get_funders': 'json_datacite',
++    'get_geo_locations': 'json_datacite',
++    'get_group_data': 'groups',
++    'get_groups_data': 'groups',
++    'get_groups_on_categories': 'stats',
++    'get_groups_on_category': 'stats',
++    'get_identifiers': 'json_datacite',
++    'get_landingpage_paths': 'publication_troubleshoot',
++    'get_language': 'json_datacite',
++    'get_last_modified_datetime': 'publication',
++    'get_latest_vault_metadata_path': 'meta',
++    'get_provenance_log': 'provenance',
++    'get_publication_config': 'publication',
++    'get_publication_date': 'publication',
++    'get_publication_state': 'publication',
++    'get_publication_year': 'json_datacite',
++    'get_publisher': 'json_datacite',
++    'get_related_resources': 'json_datacite',
++    'get_resource_monthly_category_stats': 'stats',
++    'get_resource_type': 'json_datacite',
++    'get_rights_list': 'json_datacite',
++    'get_schema_by_id': 'schema',
++    'get_schema_category_lookup_dict': 'schema',
++    'get_schema_collection': 'schema',
++    'get_schema_id': 'schema',
++    'get_schema_id_from_group': 'schema',
++    'get_schema_path_by_id': 'schema',
++    'get_storage_data': 'stats',
++    'get_subcategories': 'groups',
++    'get_subjects': 'json_datacite',
++    'get_titles': 'json_datacite',
++    'get_user_groups_for_stats': 'stats',
++    'get_val_for_attr_with_pub_prefix': 'publication_troubleshoot',
++    'get_version': 'json_datacite',
++    'group_category': 'groups',
++    'group_create': 'groups',
++    'group_name_conflicts': 'groups',
++    'group_remove_user_from_group': 'groups',
++    'group_user_add': 'groups',
++    'group_user_exists': 'groups',
++    'group_user_update_role': 'groups',
++    'html': 'schema_transformation',
++    'ingest_metadata_deposit': 'meta',
++    'ingest_metadata_research': 'meta',
++    'ingest_metadata_staging': 'meta',
++    'ingest_metadata_vault': 'meta',
++    'initialize_deaccession': 'vault_deaccession',
++    'internal_api_group_data': 'groups',
++    'is_admin': 'admin',
++    'is_transition_pending': 'vault_deaccession',
++    'json_landing_page_create_json_landing_page': 'json_landing_page',
++    'latest_action_actor': 'provenance',
++    'load': 'settings',
++    'log_action': 'provenance',
++    'metadata_get': 'datacite',
++    'metadata_get_links': 'meta',
++    'metadata_get_schema_id': 'meta',
++    'metadata_post': 'datacite',
++    'metadata_put': 'datacite',
++    'metadata_set_schema_id': 'meta',
++    'mint_doi': 'publication',
++    'package_archive_path': 'vault_archive',
++    'package_provenance_log': 'vault_archive',
++    'package_system_metadata': 'vault_archive',
++    'persistent_identifier_to_uri': 'json_landing_page',
++    'post_draft_doi_to_datacite': 'publication',
++    'post_metadata_to_datacite': 'publication',
++    'process_deaccession_status_transition': 'vault_deaccession',
++    'process_depublication': 'publication',
++    'process_publication': 'publication',
++    'process_republication': 'publication',
++    'provenance_copy_log': 'provenance',
++    'provisionExternalUser': 'groups',
++    'register_epic_pid': 'epic',
++    'removeExternalUser': 'groups',
++    'remove_metadata_from_datacite': 'publication',
++    'request_deaccession_status_transition': 'vault_deaccession',
++    'research_manifest': 'research',
++    'revoke_original_access': 'vault_deaccession',
++    'rule_add_base_doi': 'publication',
++    'rule_batch_transform_vault_metadata': 'schema_transformation',
++    'rule_batch_troubleshoot_published_data_packages': 'publication_troubleshoot',
++    'rule_batch_vault_metadata_correct_orcid_format': 'schema_transformation',
++    'rule_batch_vault_metadata_schema_report': 'schema_transformation',
++    'rule_copy_provenance_log': 'provenance',
++    'rule_external_users_sram_sync': 'groups',
++    'rule_get_transformation_info': 'schema_transformation',
++    'rule_group_check_external_user': 'groups',
++    'rule_group_description_validate': 'groups',
++    'rule_group_expiration_date_validate': 'groups',
++    'rule_group_provision_external_user': 'groups',
++    'rule_group_remove_external_user': 'groups',
++    'rule_group_sram_sync': 'groups',
++    'rule_group_user_exists': 'groups',
++    'rule_lift_embargos_on_data_access': 'publication',
++    'rule_mail_notification_report': 'notifications',
++    'rule_mail_test': 'mail',
++    'rule_meta_datamanager_vault_ingest': 'meta',
++    'rule_meta_modified_post': 'meta',
++    'rule_meta_validate': 'meta',
++    'rule_pending_deaccession_deletion': 'vault_deaccession',
++    'rule_process_data_access_token_expiry': 'notifications',
++    'rule_process_deaccession_status_transitions': 'vault_deaccession',
++    'rule_process_ending_retention_packages': 'notifications',
++    'rule_process_groups_expiration_date': 'notifications',
++    'rule_process_inactive_research_groups': 'notifications',
++    'rule_provenance_log_action': 'provenance',
++    'rule_resource_research': 'stats',
++    'rule_resource_store_pregenerated_exportdata': 'stats',
++    'rule_resource_store_storage_statistics': 'stats',
++    'rule_resource_update_misc_arb_data': 'arb',
++    'rule_resource_update_resc_arb_data': 'arb',
++    'rule_resource_vault': 'stats',
++    'rule_run_integration_tests': 'integration_tests',
++    'rule_sram_migration': 'groups',
++    'rule_transform_vault_metadata': 'schema_transformation',
++    'rule_update_publication': 'publication',
++    'rule_user_exists': 'groups',
++    'rule_vault_archive': 'vault_archive',
++    'rule_vault_create_archive': 'vault_archive',
++    'rule_vault_extract_archive': 'vault_archive',
++    'rule_vault_update_archive': 'vault_archive',
++    'rule_verify_checksum': 'checksums',
++    'save': 'meta_form',
++    'save_epic_pid': 'epic',
++    'save_publication_state': 'publication',
++    'send': 'mail',
++    'send_notification': 'notifications',
++    'set': 'notifications',
++    'set_access_restrictions': 'publication',
++    'set_deaccession_reason': 'vault_deaccession',
++    'set_temp_deaccession_reason': 'vault_deaccession',
++    'set_update_publication_state': 'publication',
++    'sram_state': 'groups',
++    'test_hashes_on_identical_collections': 'integration_tests',
++    'token_database_initialized': 'data_access_token',
++    'transform_orcid': 'schema_transformation',
++    'update': 'vault_archive',
++    'update_index_metadata': 'meta',
++    'update_previous_version_metadata': 'publication',
++    'update_publication': 'publication',
++    'user_is_a_datamanager': 'groups',
++    'user_is_datamanager': 'groups',
++    'user_role': 'groups',
++    'validate_data': 'groups',
++    'vault_archivable': 'vault_archive',
++    'vault_archival_status': 'vault_archive',
++    'vault_archive': 'vault_archive',
++    'vault_complete_deaccession': 'vault_deaccession',
++    'vault_create_archive': 'vault_archive',
++    'vault_deaccession_status': 'vault_deaccession',
++    'vault_extract_archive': 'vault_archive',
++    'vault_metadata_matches_schema': 'meta',
++    'vault_unarchive': 'vault_archive',
++    'vault_update_archive': 'vault_archive',
++    'wrapper': 'mail',
++}
+ 
+-if config.enable_tokens:
+-    from data_access_token import *
++_LAZY_OPTIONAL_GATES = {
++    "deposit": lambda: config.enable_deposit,
++    "data_access_token": lambda: config.enable_tokens,
++    "vault_archive": lambda: config.enable_data_package_archive,
++    "integration_tests": lambda: config.environment in ("testing", "development"),
++}
+ 
+-if config.enable_data_package_archive:
+-    from vault_archive import *
+ 
+-if config.environment in ("testing", "development"):
+-    from integration_tests import *
++def __getattr__(name: str):
++    mod_name = _LAZY_SYMBOL_TO_MODULE.get(name)
++    if mod_name is None:
++        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
++    gate = _LAZY_OPTIONAL_GATES.get(mod_name)
++    if gate is not None and not gate():
++        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
++    mod = importlib.import_module(mod_name)
++    val = getattr(mod, name)
++    globals()[name] = val
++    return val
