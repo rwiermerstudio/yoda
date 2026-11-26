@@ -1,0 +1,150 @@
+---
+name: "Build, Scan & Sign Production Web-Tier OCI Images"
+
+on:
+  push:
+    branches:
+      - 'development'
+      - 'release-[0-9]+.[0-9]+'
+    paths:
+      - 'distribution/containers/**'
+      - 'distribution/release-bom.yaml'
+      - '.github/workflows/build-prod-web-images.yml'
+  pull_request:
+    paths:
+      - 'distribution/containers/**'
+      - '.github/workflows/build-prod-web-images.yml'
+  schedule:
+    # Weekly security rebuild to pick up patched Ubuntu/Python base packages
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  build-scan-sign:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: yoda-portal
+            bom_key: portal
+            context: distribution/containers/yoda-portal
+          - name: yoda-eus
+            bom_key: eus
+            context: distribution/containers/yoda-eus
+          - name: yoda-public
+            bom_key: public
+            context: distribution/containers/yoda-public
+          - name: yoda-davrods
+            bom_key: davrods
+            context: distribution/containers/yoda-davrods
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build production OCI image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.context }}/Dockerfile
+          load: ${{ github.event_name == 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda' }}
+          provenance: true
+          sbom: true
+          tags: |
+            ghcr.io/utrechtuniversity/${{ matrix.service.name }}:prod-${{ github.ref_name }}
+            ghcr.io/utrechtuniversity/${{ matrix.service.name }}:sha-${{ github.sha }}
+
+      - name: Scan image for CRITICAL/HIGH CVEs with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/utrechtuniversity/${{ matrix.service.name }}:sha-${{ github.sha }}
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign pushed image digest with Cosign (keyless OIDC)
+        if: github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda'
+        run: |
+          cosign sign --yes \
+            "ghcr.io/utrechtuniversity/${{ matrix.service.name }}@${{ steps.build.outputs.digest }}"
+
+      - name: Export signed digest for BOM update
+        if: github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda'
+        run: |
+          mkdir -p digests
+          echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.service.bom_key }}.digest"
+
+      - name: Upload signed digest artifact
+        if: github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.service.bom_key }}
+          path: digests/${{ matrix.service.bom_key }}.digest
+
+  propose-bom-update:
+    needs: build-scan-sign
+    if: github.event_name != 'pull_request' && github.repository == 'utrechtuniversity/yoda'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download signed image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Set up Python 3.12 and install yoda-config
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Update distribution/release-bom.yaml with signed digests
+        run: |
+          pip install -e tools/yoda_config
+          for f in digests/*.digest; do
+            comp="$(basename "${f}" .digest)"
+            digest="$(cat "${f}")"
+            yoda-config bump-bom \
+              --bom distribution/release-bom.yaml \
+              --component "${comp}" \
+              --tag "prod-${GITHUB_REF_NAME}" \
+              --digest "${digest}"
+          done
+          git diff distribution/release-bom.yaml
+
+      - name: Open PR with updated Release BOM
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: "automation/bom-security-update-${{ github.ref_name }}"
+          commit-message: "chore(bom): pin signed web-tier image digests"
+          title: "chore(bom): update signed web-tier image digests (${{ github.ref_name }})"
+          body: "Automated security rebuild update pinning newly Trivy-scanned and Cosign-signed OCI image digests in `distribution/release-bom.yaml`."

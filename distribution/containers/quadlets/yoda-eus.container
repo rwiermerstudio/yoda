@@ -1,0 +1,27 @@
+# Podman Quadlet unit for yoda-eus (External User Service).
+# Place in /etc/containers/systemd/yoda-eus.container
+
+[Unit]
+Description=Yoda External User Service (Production OCI Container)
+After=network-online.target yoda-web-network.service
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/utrechtuniversity/yoda-eus:prod-development
+ContainerName=yoda-eus
+Network=yoda-web.network
+AutoUpdate=registry
+PublishPort=127.0.0.1:8083:8080
+EnvironmentFile=/etc/yoda/eus.env
+Volume=/etc/yoda/rendered/eus/eus.cfg:/etc/yoda/eus.cfg:ro,Z
+Volume=/var/lib/yoda/eus-sessions:/var/www/extuser/sessions:rw,Z
+ReadOnly=true
+Tmpfs=/tmp:rw,noexec,nosuid
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

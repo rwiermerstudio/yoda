@@ -1,0 +1,73 @@
+---
+# copyright Utrecht University
+# Layered Playbook (Phase 1 / Option C): iRODS Platform Layer
+#
+# Provisions and upgrades the iRODS provider (iCAT) and consumer (resource) servers
+# independently of OS baseline patching, external infrastructure (PostgreSQL, OpenSearch,
+# SMTP, TLS ingress), and the stateless containerized web tier.
+
+- name: Check Ansible version
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Verify Ansible (core) version meets requirements
+      ansible.builtin.assert:
+        that: "ansible_version.full is version('2.16', '>=')"
+        msg: "You must update Ansible (core) to at least 2.16 to deploy Yoda."
+
+
+- name: Provision iRODS iCAT provider
+  hosts: icats
+  become: true
+  roles:
+    - pam_python
+    - postgresql_odbc
+    - irods_icat
+    - irods_log
+    - irods_runtime
+    - role: irods_resource_plugin_s3
+      when: enable_s3_resource | default(false)
+    - irods_microservices
+    - irods_completion
+    - irods_rodsadmin
+    - irods_arb
+    - role: irods_consistency_check
+      when: enable_irods_consistency_check | default(false)
+    - role: icat_database_checker
+      when: enable_icat_database_checker | default(false)
+    - role: data_archive
+      when: (enable_data_package_archive | default(false)) and yoda_environment != "development"
+    - role: irods_gocommands
+      when: irods_enable_gocommands | default(false)
+  tags:
+    - icat
+
+
+- name: Provision iRODS resource servers
+  hosts: resources
+  become: true
+  roles:
+    - irods_resource
+    - irods_log
+    - role: irods_resource_plugin_s3
+      when: enable_s3_resource | default(false)
+    - irods_runtime
+    - irods_microservices
+    - irods_completion
+    - irods_arb
+    - role: irods_gocommands
+      when: irods_enable_gocommands | default(false)
+    - role: irods_consistency_check
+      when: enable_irods_consistency_check | default(false)
+  tags:
+    - resource
+
+
+- name: Provision composable iRODS resources
+  hosts: icats
+  become: true
+  roles:
+    - composable_resources
+  tags:
+    - icat
+    - resources

@@ -1,0 +1,79 @@
+# Yoda Release Bill of Materials (BOM)
+# Single source of truth pinning compatible component versions, OCI image
+# references, OS package versions, and external infrastructure contracts.
+apiVersion: yoda.uu.nl/v1
+kind: ReleaseBOM
+release:
+  yoda_version: "2.2.0-dev"
+  channel: development
+  release_date: "TBA"
+
+# External infrastructure contracts (BYO in production; optional reference recipes in dev)
+external_contracts:
+  postgresql:
+    min_version: "15"
+    max_version: "18"
+    required_settings:
+      standard_conforming_strings: "off"
+  opensearch:
+    optional: true
+    min_version: "2.11"
+  redis:
+    optional: true
+    required_when: "integrations.anubis.enabled == true"
+    min_version: "7.0"
+  smtp:
+    protocol: "smtp/smtps"
+    starttls_recommended: true
+  tls_ingress:
+    required_headers:
+      - "X-Forwarded-For"
+      - "X-Forwarded-Proto"
+      - "Host"
+
+# Stateless Web Tier (Phase 1: Production OCI Containers)
+web_tier_images:
+  portal:
+    image: "ghcr.io/utrechtuniversity/yoda-portal"
+    tag: "development"
+    digest: null
+  davrods:
+    image: "ghcr.io/utrechtuniversity/davrods"
+    tag: "development"
+    digest: null
+  public:
+    image: "ghcr.io/utrechtuniversity/yoda-public"
+    tag: "development"
+    digest: null
+  eus:
+    image: "ghcr.io/utrechtuniversity/yoda-eus"
+    tag: "development"
+    digest: null
+
+# Stateful Data Tier (Phase 1: Versioned .deb/.rpm Packages on VMs; Phase 3: Optional OCI)
+data_tier_packages:
+  supported_os:
+    - "ubuntu-24.04"
+    - "el-9"
+  irods:
+    server_version: "5.0.2"
+    rule_engine_python_version: "5.0.1"
+    uu_microservices_version: "1.3.1"
+    sudo_microservices_version: "1.0.0"
+  yoda_ruleset:
+    package_name: "yoda-ruleset"
+    version: "2.2.0~dev"
+  yoda_report:
+    package_name: "yoda-report"
+    version: "2.2.0~dev"
+  yoda_clienttools:
+    package_name: "yoda-clienttools"
+    version: "2.2.0~dev"
+
+# Phase 3 (Optional): Containerized Data Tier
+data_tier_images:
+  provider:
+    image: "ghcr.io/utrechtuniversity/yoda-provider"
+    tag: "development"
+    digest: null
+    maturity: experimental

@@ -1,0 +1,25 @@
+# Podman Quadlet unit for yoda-public (MOAI OAI-PMH + published landing pages).
+# Place in /etc/containers/systemd/yoda-public.container
+
+[Unit]
+Description=Yoda Public / MOAI (Production OCI Container)
+After=network-online.target yoda-web-network.service
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/utrechtuniversity/yoda-public:prod-development
+ContainerName=yoda-public
+Network=yoda-web.network
+AutoUpdate=registry
+PublishPort=127.0.0.1:8082:8080
+Volume=/etc/yoda/rendered/public/moai-settings.ini:/etc/yoda/moai-settings.ini:ro,Z
+Volume=/var/lib/yoda/public/metadata:/var/www/moai/metadata:rw,Z
+Volume=/var/lib/yoda/public/landingpages:/var/www/landingpages:ro,Z
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

@@ -1,0 +1,24 @@
+# Podman Quadlet unit for yoda-davrods (WebDAV interface to iRODS).
+# Place in /etc/containers/systemd/yoda-davrods.container
+
+[Unit]
+Description=Yoda DavRODS (Production OCI Container)
+After=network-online.target yoda-web-network.service
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/utrechtuniversity/yoda-davrods:prod-development
+ContainerName=yoda-davrods
+Network=yoda-web.network
+AutoUpdate=registry
+PublishPort=127.0.0.1:8081:8080
+Volume=/etc/yoda/rendered/davrods/davrods-vhost.conf:/etc/yoda/davrods-vhost.conf:ro,Z
+Volume=/etc/yoda/irods/irods_environment.json:/etc/apache2/irods/irods_environment.json:ro,Z
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

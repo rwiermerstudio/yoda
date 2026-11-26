@@ -1,0 +1,45 @@
+---
+name: "Yoda Config & Release BOM CI"
+
+on:
+  push:
+    branches:
+      - 'development'
+      - 'release-[0-9]+.[0-9]+'
+    paths:
+      - 'distribution/**'
+      - 'tools/yoda_config/**'
+      - 'environments/**'
+      - '.github/workflows/yoda-config-ci.yml'
+  pull_request:
+    paths:
+      - 'distribution/**'
+      - 'tools/yoda_config/**'
+      - 'environments/**'
+      - '.github/workflows/yoda-config-ci.yml'
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install yoda-config and dev dependencies
+        run: pip install -e "tools/yoda_config[dev]"
+
+      - name: Run yoda-config unit and integration tests
+        run: pytest -v tools/yoda_config/tests
+
+      - name: Verify Ansible import and BOM validation for development environments
+        run: |
+          for env in full allinone; do
+            yoda-config import-ansible "environments/development/${env}" -o "/tmp/${env}.yoda.yaml"
+            yoda-config validate "/tmp/${env}.yoda.yaml" --bom distribution/release-bom.yaml
+            yoda-config render "/tmp/${env}.yoda.yaml" --bom distribution/release-bom.yaml -o "/tmp/rendered-${env}"
+          done

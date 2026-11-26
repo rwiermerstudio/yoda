@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yoda-config"
+version = "0.1.0"
+description = "Typed configuration schema, early-fail validator, Ansible importer, and renderer for Yoda."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7,<3.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+yoda-config = "yoda_config.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["yoda_config*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

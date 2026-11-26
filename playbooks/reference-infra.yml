@@ -1,0 +1,56 @@
+---
+# copyright Utrecht University
+# Opt-in Reference Playbook: External Infrastructure Dependencies
+#
+# In the Hybrid (Option C) architecture, PostgreSQL, PgBouncer, OpenSearch, Redis,
+# Postfix, and Anubis are external infrastructure dependencies governed by contracts
+# in distribution/release-bom.yaml.
+#
+# Operators using managed/institutional services should NOT run this playbook.
+# It is provided as an optional reference for small deployments and dev/test environments.
+
+- name: Provision reference PostgreSQL and PgBouncer database tier
+  hosts: databases
+  become: true
+  roles:
+    - postgresql
+    - role: pgbouncer
+      when: enable_pgbouncer | default(false)
+    - irods_database
+    - yoda_database_indexes
+  tags:
+    - database
+
+
+- name: Provision reference OpenSearch service
+  hosts: portals
+  become: true
+  roles:
+    - role: opensearch
+      when: enable_open_search | default(false)
+  tags:
+    - opensearch
+
+
+- name: Provision reference Postfix local MTA
+  hosts: icats,eus
+  become: true
+  roles:
+    - role: postfix
+      when: enable_postfix | default(false)
+  tags:
+    - smtp
+
+
+- name: Provision reference Anubis and Redis edge protection
+  hosts: publics,davrods
+  become: true
+  roles:
+    - role: redis
+      vars:
+        redis_port: 6380
+      when: enable_anubis | default(false)
+    - role: anubis
+      when: enable_anubis | default(false)
+  tags:
+    - anubis

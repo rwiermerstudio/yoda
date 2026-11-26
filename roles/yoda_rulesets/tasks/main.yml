@@ -60,6 +60,16 @@
   when: "'repo' in item and 'patch' in item"
 
 
+- name: Warn about deprecated inline ruleset patching
+  ansible.builtin.debug:
+    msg: >-
+      DEPRECATION WARNING: Inline git-apply patching on '{{ item.name }}' is deprecated.
+      Migrate to a build-time patched package via distribution/packaging/yoda-ruleset/build-package.sh --patch
+      or a versioned extension in /etc/irods/yoda-extensions.d/ (see docs/administration/ruleset-extensions.md).
+  with_items: "{{ extra_rulesets + core_rulesets }}"
+  when: "'repo' in item and 'patch' in item and item['patch'] not in ['']"
+
+
 - name: Apply patches to rulesets
   become_user: "{{ irods_service_account }}"
   become: true

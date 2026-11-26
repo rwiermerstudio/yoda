@@ -1,0 +1,29 @@
+# Reference Podman Quadlet unit for running yoda-portal via systemd on EL 9 / Ubuntu 24.04 VMs.
+# Place in /etc/containers/systemd/yoda-portal.container and run:
+#   systemctl daemon-reload && systemctl enable --now yoda-portal.service
+
+[Unit]
+Description=Yoda Portal (Production OCI Container)
+After=network-online.target yoda-web-network.service
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/utrechtuniversity/yoda-portal:prod-development
+ContainerName=yoda-portal
+Network=yoda-web.network
+AutoUpdate=registry
+PublishPort=127.0.0.1:8080:8080
+EnvironmentFile=/etc/yoda/portal.env
+Volume=/etc/yoda/rendered/portal/flask.cfg:/etc/yoda/flask.cfg:ro,Z
+Volume=/etc/yoda/themes:/var/www/yoda/themes:ro,Z
+Volume=/var/lib/yoda/portal-sessions:/var/www/portal-sessions:rw,Z
+ReadOnly=true
+Tmpfs=/tmp:rw,noexec,nosuid
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

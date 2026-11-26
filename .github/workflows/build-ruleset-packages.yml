@@ -1,0 +1,71 @@
+---
+name: "Build yoda-ruleset OS Packages (.deb & .rpm)"
+
+on:
+  push:
+    branches:
+      - 'development'
+      - 'release-[0-9]+.[0-9]+'
+    paths:
+      - 'distribution/packaging/yoda-ruleset/**'
+      - 'distribution/release-bom.yaml'
+      - '.github/workflows/build-ruleset-packages.yml'
+  pull_request:
+    paths:
+      - 'distribution/packaging/yoda-ruleset/**'
+      - 'distribution/release-bom.yaml'
+      - '.github/workflows/build-ruleset-packages.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g. 2.2.0)'
+        required: true
+        default: '2.2.0~dev'
+      ref:
+        description: 'yoda-ruleset git ref/tag'
+        required: true
+        default: 'development'
+
+jobs:
+  build-packages:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - format: deb
+            os_label: ubuntu-24.04
+          - format: rpm
+            os_label: el-9
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install fpm and build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ruby ruby-dev build-essential rpm python3-venv git make
+          sudo gem install --no-document fpm
+
+      - name: Build yoda-ruleset .${{ matrix.format }} package
+        run: |
+          VERSION="${{ github.event.inputs.version || '2.2.0~dev' }}"
+          REF="${{ github.event.inputs.ref || github.ref_name }}"
+          ./distribution/packaging/yoda-ruleset/build-package.sh \
+            --version "${VERSION}" \
+            --ref "${REF}" \
+            --format "${{ matrix.format }}" \
+            --out-dir ./dist
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum * > "SHA256SUMS-${{ matrix.os_label }}.txt"
+          cat "SHA256SUMS-${{ matrix.os_label }}.txt"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yoda-ruleset-${{ matrix.os_label }}-${{ matrix.format }}
+          path: dist/*

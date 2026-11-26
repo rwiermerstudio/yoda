@@ -1,0 +1,9 @@
+# Podman Quadlet network shared by Yoda web-tier and optional edge containers.
+# Place in /etc/containers/systemd/yoda-web.network
+
+[Unit]
+Description=Yoda Web Tier Internal Network
+
+[Network]
+NetworkName=yoda-web
+Internal=false

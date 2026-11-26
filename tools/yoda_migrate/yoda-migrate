@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Idempotent, state-tracked post-upgrade migration runner for Yoda.
+
+Replaces manual post-upgrade release-note steps (e.g., update-publications.r,
+metadata schema synchronization, and service health verification) with tracked,
+repeatable migration hooks.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+DEFAULT_STATE_FILE = Path("/var/lib/yoda/migrations-state.json")
+
+
+@dataclass(frozen=True)
+class MigrationStep:
+    id: str
+    description: str
+    command: list[str]
+    run_every_upgrade: bool = False
+
+
+MIGRATIONS: list[MigrationStep] = [
+    MigrationStep(
+        id="sync_metadata_schemas",
+        description="Synchronize metadata schemas into iRODS system collections",
+        command=[
+            "irule",
+            "-r",
+            "irods_rule_engine_plugin-irods_rule_language-instance",
+            "-F",
+            "/etc/irods/yoda-ruleset/tools/install-schemas.r",
+        ],
+        run_every_upgrade=True,
+    ),
+    MigrationStep(
+        id="update_publications",
+        description="Update published data package endpoints (DataCite, landingpages, OAI-PMH)",
+        command=[
+            "irule",
+            "-r",
+            "irods_rule_engine_plugin-irods_rule_language-instance",
+            "-F",
+            "/etc/irods/yoda-ruleset/tools/update-publications.r",
+        ],
+        run_every_upgrade=True,
+    ),
+]
+
+
+def load_state(state_file: Path) -> dict:
+    if not state_file.is_file():
+        return {"applied": {}, "last_version": None}
+    return json.loads(state_file.read_text(encoding="utf-8"))
+
+
+def save_state(state_file: Path, state: dict) -> None:
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="yoda-migrate",
+        description="Idempotent post-upgrade migration runner for Yoda.",
+    )
+    parser.add_argument("--version", required=True, help="Target Yoda release version (e.g. 2.2.0)")
+    parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE), help="Path to migration state JSON")
+    parser.add_argument("--dry-run", action="store_true", help="Show pending migrations without executing")
+    args = parser.parse_args(argv)
+
+    state_file = Path(args.state_file)
+    state = load_state(state_file)
+    applied: dict = state.setdefault("applied", {})
+
+    pending: list[MigrationStep] = []
+    for step in MIGRATIONS:
+        step_key = f"{step.id}@{args.version}" if step.run_every_upgrade else step.id
+        if step_key not in applied:
+            pending.append(step)
+
+    if not pending:
+        print(f"All migrations already applied for Yoda {args.version}.")
+        return 0
+
+    for step in pending:
+        step_key = f"{step.id}@{args.version}" if step.run_every_upgrade else step.id
+        cmd_str = " ".join(step.command)
+        if args.dry_run:
+            print(f"[DRY-RUN] Would run {step_key}: {step.description}")
+            print(f"          cmd: {cmd_str}")
+            continue
+
+        print(f"[APPLY] {step_key}: {step.description}")
+        proc = subprocess.run(step.command, check=False)
+        if proc.returncode != 0:
+            print(f"ERROR: Migration '{step_key}' failed with exit code {proc.returncode}.", file=sys.stderr)
+            return proc.returncode
+
+        applied[step_key] = datetime.now(timezone.utc).isoformat()
+        state["last_version"] = args.version
+        save_state(state_file, state)
+
+    if not args.dry_run:
+        print(f"Successfully applied {len(pending)} migration(s) for Yoda {args.version}.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
