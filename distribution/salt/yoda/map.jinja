@@ -1,0 +1,18 @@
+{# Centralized Pillar defaults for the Yoda Hybrid (Option C) Salt formula #}
+{% set yoda = salt['pillar.get']('yoda', {
+  'repo_url': 'https://github.com/rwiermerstudio/yoda.git',
+  'git_ref': 'feat/hybrid-distribution-modernization',
+  'deploy_dir': '/opt/yoda-deploy',
+  'venv_dir': '/opt/yoda-config-venv',
+  'config_dir': '/etc/yoda',
+  'rendered_dir': '/etc/yoda/rendered',
+  'data_dir': '/var/lib/yoda',
+  'ruleset_version': '2.2.0',
+  'manage_database': True,
+  'manage_irods': True,
+  'manage_ruleset': True,
+  'with_reference_edge': True,
+  'compose_cmd': 'docker compose',
+  'secrets': {},
+  'config': {},
+}, merge=True) %}

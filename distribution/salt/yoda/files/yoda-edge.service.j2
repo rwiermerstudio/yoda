@@ -1,0 +1,17 @@
+[Unit]
+Description=Yoda Reference Edge (Caddy TLS Proxy + Anubis + Redis)
+Requires=docker.service yoda-web.service
+After=docker.service yoda-web.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ yoda.rendered_dir }}/edge
+ExecStart=/usr/bin/env {{ yoda.compose_cmd }} --env-file {{ yoda.config_dir }}/secrets.env -f {{ yoda.rendered_dir }}/edge/docker-compose.edge.yml up -d --remove-orphans
+ExecReload=/usr/bin/env {{ yoda.compose_cmd }} --env-file {{ yoda.config_dir }}/secrets.env -f {{ yoda.rendered_dir }}/edge/docker-compose.edge.yml up -d --remove-orphans
+ExecStop=/usr/bin/env {{ yoda.compose_cmd }} --env-file {{ yoda.config_dir }}/secrets.env -f {{ yoda.rendered_dir }}/edge/docker-compose.edge.yml down
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
