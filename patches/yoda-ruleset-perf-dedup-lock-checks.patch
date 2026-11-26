@@ -1,0 +1,107 @@
+--- a/policies.py	2026-11-25 16:13:35.550714358 +0000
++++ b/policies.py	2026-11-26 09:03:21.438194046 +0000
+@@ -79,22 +79,26 @@
+                       can_coll_create(ctx, actor, dst))
+ 
+ 
++# Track the most recent (actor, path) already validated by pep_api_data_obj_put_pre
++# within this agent process so py_acPostProcForPut does not duplicate lock GenQueries
++# for regular puts (MSIs bypass pep_api_data_obj_put_pre and still run the check).
++_validated_put_target: tuple[str, str] | None = None
++
++
+ def can_data_create(ctx: rule.Context, actor: str, path: str) -> policy.Succeed | policy.Fail:
+     log.debug(ctx, f'check data create <{path}>')
+ 
+-    if pathutil.info(path).space in [pathutil.Space.RESEARCH, pathutil.Space.DEPOSIT]:
+-        if folder.is_locked(ctx, pathutil.dirname(path)):
+-            # Parent coll locked?
+-            if not user.is_rodsadmin(ctx, actor):
++    space = pathutil.info(path).space
++    if space in (pathutil.Space.RESEARCH, pathutil.Space.DEPOSIT):
++        if not user.is_rodsadmin(ctx, actor):
++            if folder.is_locked(ctx, pathutil.dirname(path)):
+                 return policy.fail('Folder is locked')
+-        elif folder.is_data_locked(ctx, path):
+-            # If the parent coll is not locked, there might still be a lock on
+-            # an existing destination data object (though this situation cannot
+-            # arise through portal actions).
+-            if not user.is_rodsadmin(ctx, actor):
++            if folder.is_data_locked(ctx, path):
++                # If the parent coll is not locked, there might still be a lock on
++                # an existing destination data object (though this situation cannot
++                # arise through portal actions).
+                 return policy.fail('Destination is locked')
+-
+-    if pathutil.info(path).space is pathutil.Space.INTAKE:
++    elif space is pathutil.Space.INTAKE:
+         if policies_intake.is_data_in_locked_dataset(ctx, user.user_and_zone(ctx), path):
+             return policy.fail('Data part of a locked dataset')
+ 
+@@ -104,13 +108,13 @@
+ def can_data_write(ctx: rule.Context, actor: str, path: str) -> policy.Succeed | policy.Fail:
+     log.debug(ctx, f'check data write <{path}>')
+ 
++    space = pathutil.info(path).space
+     # Disallow writing to locked objects in research and deposit folders.
+-    if pathutil.info(path).space in [pathutil.Space.RESEARCH, pathutil.Space.DEPOSIT]:
+-        if folder.is_data_locked(ctx, path) and not user.is_rodsadmin(ctx, actor):
++    if space in (pathutil.Space.RESEARCH, pathutil.Space.DEPOSIT):
++        if not user.is_rodsadmin(ctx, actor) and folder.is_data_locked(ctx, path):
+             return policy.fail('Data object is locked')
+-
+     # Disallow writing to locked datasets in intake.
+-    if pathutil.info(path).space is pathutil.Space.INTAKE:
++    elif space is pathutil.Space.INTAKE:
+         if policies_intake.is_data_in_locked_dataset(ctx, user.user_and_zone(ctx), path):
+             return policy.fail('Data part of a locked dataset')
+ 
+@@ -121,11 +125,11 @@
+     if re.match(r'^/[^/]+/home/[^/]+$', path) and not user.is_rodsadmin(ctx, actor):
+         return policy.fail('Cannot delete or move data directly under /home')
+ 
+-    if pathutil.info(path).space in [pathutil.Space.RESEARCH, pathutil.Space.DEPOSIT]:
++    space = pathutil.info(path).space
++    if space in (pathutil.Space.RESEARCH, pathutil.Space.DEPOSIT):
+         if not user.is_rodsadmin(ctx, actor) and folder.is_data_locked(ctx, path):
+             return policy.fail('Folder is locked')
+-
+-    if pathutil.info(path).space is pathutil.Space.INTAKE:
++    elif space is pathutil.Space.INTAKE:
+         if policies_intake.is_data_in_locked_dataset(ctx, user.user_and_zone(ctx), path):
+             return policy.fail('Data part of a locked dataset')
+ 
+@@ -211,11 +215,17 @@
+ 
+ @policy.require()
+ def py_acPostProcForPut(ctx: rule.Context) -> policy.Succeed | policy.Fail:
++    global _validated_put_target
+     log.debug(ctx, 'py_acPostProcForPut')
+     # Data object creation cannot be prevented by API dynpeps and static PEPs,
+     # due to how MSIs work. Thus, this ugly workaround specifically for MSIs.
+     path = str(session_vars.get_map(ctx.rei)['data_object']['object_path'])
+-    x = can_data_create(ctx, user.user_and_zone(ctx), path)
++    actor = user.user_and_zone(ctx)
++    if _validated_put_target == (actor, path):
++        _validated_put_target = None
++        return policy.succeed()
++
++    x = can_data_create(ctx, actor, path)
+ 
+     if not x:
+         data_object.remove(ctx, path, force=True)
+@@ -261,8 +271,12 @@
+         if str(cond_input.key[i]) == 'filePath':
+             return policy.fail('Physical path specification is not allowed for put operations')
+ 
+-    return can_data_create(ctx, user.user_and_zone(ctx),
+-                           str(data_obj_inp.objPath))
++    global _validated_put_target
++    actor = user.user_and_zone(ctx)
++    obj_path = str(data_obj_inp.objPath)
++    res = can_data_create(ctx, actor, obj_path)
++    _validated_put_target = (actor, obj_path) if res else None
++    return res
+ 
+ 
+ @policy.require()
