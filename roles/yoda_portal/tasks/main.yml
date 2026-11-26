@@ -226,3 +226,14 @@
     state: true
     persistent: true
   when: ansible_facts['os_family'] == 'RedHat' and ansible_facts['selinux']['status'] == "enabled" and enable_open_search
+
+
+- name: Apply Portal connman iRODS session TTL performance patch
+  become_user: "{{ yoda_deployment_user }}"
+  become: true
+  ansible.posix.patch:
+    src: "{{ playbook_dir }}/patches/yoda-portal-perf-connman-ttl.patch"
+    basedir: /var/www/yoda
+    strip: 1
+  when: not ansible_check_mode
+  notify: Restart Apache webserver

@@ -1,0 +1,19 @@
+--- a/connman.py	2026-11-25 16:13:36.469034110 +0000
++++ b/connman.py	2026-11-26 09:04:25.300428326 +0000
+@@ -3,6 +3,7 @@
+ __copyright__ = 'Copyright (c) 2021-2024, Utrecht University'
+ __license__   = 'GPLv3, see LICENSE'
+ 
++import os
+ import threading
+ import time
+ from typing import Dict, Optional
+@@ -10,7 +11,7 @@
+ from irods.session import iRODSSession
+ 
+ TTL = 60 * 30   # Time to live (TTL) for Flask sessions.
+-IRODS_TTL = 60  # Time to live (TTL) for iRODS sessions.
++IRODS_TTL = int(os.environ.get('IRODS_SESSION_TTL', '300'))  # Time to live (TTL) for iRODS sessions.
+ 
+ 
+ class Session(object):

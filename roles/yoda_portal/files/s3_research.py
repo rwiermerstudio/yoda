@@ -5,7 +5,6 @@ __copyright__ = 'Copyright (c) 2021-2026, Utrecht University'
 __license__   = 'GPLv3, see LICENSE'
 
 import os
-import queue
 import threading
 import time
 from contextlib import suppress
@@ -49,34 +48,11 @@ class _OpenUpload:
     handle: Any
     expected_chunk: int
     last_activity: float
+    lock: threading.Lock
 
 
-class Chunk:
-    def __init__(self,
-                 data_objects: Optional[DataObjectManager],
-                 path: Optional[str],
-                 number: int,
-                 size: int,
-                 data: Optional[bytes],
-                 resource: Optional[str],
-                 flow_id: Optional[str] = None,
-                 total_chunks: int = 1,
-                 total_size: Optional[int] = None) -> None:
-        self.data_objects: Optional[DataObjectManager] = data_objects
-        self.path: Optional[str] = path
-        self.number: int = number
-        self.size: int = size
-        self.data: Optional[bytes] = data
-        self.resource: Optional[str] = resource
-        self.flow_id: Optional[str] = flow_id
-        self.total_chunks: int = total_chunks
-        self.total_size: Optional[int] = total_size
-
-
-q: queue.Queue[Chunk] = queue.Queue(4)
 active_streams: dict[tuple[str, str], _OpenUpload] = {}
-failed_streams: set[tuple[str, str]] = set()
-failed_streams_lock = threading.Lock()
+streams_dict_lock = threading.Lock()
 
 
 def _close_stream(stream: _OpenUpload, suppress_close_error: bool = True) -> None:
@@ -93,124 +69,139 @@ def _close_stream(stream: _OpenUpload, suppress_close_error: bool = True) -> Non
 
 def _reap_stale_streams() -> None:
     now = time.monotonic()
-    stale_keys = [
-        key for key, stream in active_streams.items()
-        if now - stream.last_activity > STALE_STREAM_TIMEOUT_SEC
-    ]
-    for key in stale_keys:
-        stream = active_streams.pop(key, None)
-        if stream is not None:
-            log_error(f"Closing stale upload stream for {key[1]}")
+    stale: list[_OpenUpload] = []
+    with streams_dict_lock:
+        stale_keys = [
+            key for key, stream in active_streams.items()
+            if now - stream.last_activity > STALE_STREAM_TIMEOUT_SEC
+        ]
+        for key in stale_keys:
+            stream = active_streams.pop(key, None)
+            if stream is not None:
+                stale.append(stream)
+    for stream in stale:
+        with stream.lock:
+            log_error("Closing stale upload stream")
             _close_stream(stream, suppress_close_error=True)
 
 
-def irods_writer() -> None:
+def _stale_stream_reaper() -> None:
     while True:
+        time.sleep(30.0)
+        _reap_stale_streams()
+
+
+threading.Thread(target=_stale_stream_reaper, name='irods-upload-reaper', daemon=True).start()
+
+
+def _write_chunk_direct(
+    data_objects: DataObjectManager,
+    path: str,
+    number: int,
+    size: int,
+    data: Optional[bytes],
+    resource: Optional[str],
+    flow_id: Optional[str],
+    total_chunks: int,
+    total_size: Optional[int],
+) -> None:
+    """Write an upload chunk directly on the request thread with per-stream locking.
+
+    Eliminates the single global writer thread and q.join() head-of-line blocking so
+    concurrent users and parallel file uploads scale across WSGI worker threads.
+    """
+    key = (flow_id or path, path)
+
+    if number == 1:
+        with streams_dict_lock:
+            existing = active_streams.pop(key, None)
+        if existing is not None:
+            with existing.lock:
+                _close_stream(existing, suppress_close_error=True)
+
+        stream_sess = data_objects.sess.clone()
+        stream_sess.numThreads = 1
+        open_opts: dict[str, Any] = {
+            kw.OPR_TYPE_KW: PUT_OPR,
+            kw.NUM_THREADS_KW: '1',
+        }
+        if resource:
+            open_opts[kw.DEST_RESC_NAME_KW] = resource
+        if total_size is not None and total_size >= 0:
+            open_opts[kw.DATA_SIZE_KW] = str(total_size)
+
+        obj_desc: Any = None
         try:
-            chunk = q.get(timeout=30.0)
-        except queue.Empty:
-            _reap_stale_streams()
-            continue
-
-        try:
-            _reap_stale_streams()
-            if chunk.path and chunk.data_objects is not None:
-                key = (chunk.flow_id or chunk.path, chunk.path)
-
-                if chunk.number == 1:
-                    with failed_streams_lock:
-                        failed_streams.discard(key)
-                    existing = active_streams.pop(key, None)
-                    if existing is not None:
-                        _close_stream(existing, suppress_close_error=True)
-                else:
-                    with failed_streams_lock:
-                        if key in failed_streams:
-                            continue
-
-                stream_sess: Optional[iRODSSession] = None
-                obj_desc: Any = None
-                try:
-                    if chunk.number == 1:
-                        # Clone session so connman GC cannot disconnect an active multi-chunk stream
-                        # and isolate numThreads=1 for single-stream cacheless S3 multipart upload.
-                        stream_sess = chunk.data_objects.sess.clone()
-                        stream_sess.numThreads = 1
-                        open_opts: dict[str, Any] = {
-                            kw.OPR_TYPE_KW: PUT_OPR,
-                            kw.NUM_THREADS_KW: '1',
-                        }
-                        if chunk.resource:
-                            open_opts[kw.DEST_RESC_NAME_KW] = chunk.resource
-                        if chunk.total_size is not None and chunk.total_size >= 0:
-                            open_opts[kw.DATA_SIZE_KW] = str(chunk.total_size)
-
-                        # Opening with 'w' sets O_WRONLY | O_CREAT | O_TRUNC, replacing existing
-                        # objects on both S3 and unixfilesystem without needing RESOURCE_OP_TRUNCATE.
-                        obj_desc = stream_sess.data_objects.open(chunk.path, 'w', **open_opts)
-                        if chunk.data:
-                            obj_desc.write(chunk.data)
-
-                        if chunk.total_chunks <= 1:
-                            try:
-                                obj_desc.close()
-                            finally:
-                                with suppress(Exception):
-                                    stream_sess.cleanup()
-                        else:
-                            active_streams[key] = _OpenUpload(
-                                session=stream_sess,
-                                handle=obj_desc,
-                                expected_chunk=2,
-                                last_activity=time.monotonic(),
-                            )
-                    else:
-                        stream = active_streams.get(key)
-                        if stream is not None and chunk.number == stream.expected_chunk:
-                            if chunk.data:
-                                stream.handle.write(chunk.data)
-                            stream.last_activity = time.monotonic()
-                            stream.expected_chunk += 1
-                            if chunk.number >= chunk.total_chunks:
-                                active_streams.pop(key, None)
-                                _close_stream(stream, suppress_close_error=False)
-                        else:
-                            # Fallback for out-of-order or resumed chunk writes.
-                            if stream is not None:
-                                active_streams.pop(key, None)
-                                _close_stream(stream, suppress_close_error=True)
-                            stream_sess = chunk.data_objects.sess.clone()
-                            stream_sess.numThreads = 1
-                            fallback_opts: dict[str, Any] = {}
-                            if chunk.resource:
-                                fallback_opts[kw.DEST_RESC_NAME_KW] = chunk.resource
-                            try:
-                                with stream_sess.data_objects.open(chunk.path, 'a', **fallback_opts) as fd:
-                                    fd.seek(int(chunk.size * (chunk.number - 1)))
-                                    if chunk.data:
-                                        fd.write(chunk.data)
-                            finally:
-                                with suppress(Exception):
-                                    stream_sess.cleanup()
-                except Exception as exc:
-                    log_error(f"Chunk upload failed for {chunk.path}: {exc}")
-                    aborted = active_streams.pop(key, None)
-                    if aborted is not None:
-                        _close_stream(aborted, suppress_close_error=True)
-                    else:
-                        if obj_desc is not None:
-                            with suppress(Exception):
-                                obj_desc.close()
-                        if stream_sess is not None:
-                            with suppress(Exception):
-                                stream_sess.cleanup()
-                    with failed_streams_lock:
-                        failed_streams.add(key)
+            obj_desc = stream_sess.data_objects.open(path, 'w', **open_opts)
+            if data:
+                obj_desc.write(data)
+            if total_chunks <= 1:
+                obj_desc.close()
+                obj_desc = None
+                with suppress(Exception):
+                    stream_sess.cleanup()
+                stream_sess = None  # type: ignore[assignment]
+            else:
+                stream = _OpenUpload(
+                    session=stream_sess,
+                    handle=obj_desc,
+                    expected_chunk=2,
+                    last_activity=time.monotonic(),
+                    lock=threading.Lock(),
+                )
+                with streams_dict_lock:
+                    active_streams[key] = stream
+                obj_desc = None
+                stream_sess = None  # type: ignore[assignment]
         finally:
-            q.task_done()
+            if obj_desc is not None:
+                with suppress(Exception):
+                    obj_desc.close()
+            if stream_sess is not None:
+                with suppress(Exception):
+                    stream_sess.cleanup()
+        return
 
+    with streams_dict_lock:
+        stream = active_streams.get(key)
 
-threading.Thread(target=irods_writer, name='irods-writer', daemon=True).start()
+    if stream is not None:
+        with stream.lock:
+            if number == stream.expected_chunk:
+                try:
+                    if data:
+                        stream.handle.write(data)
+                    stream.last_activity = time.monotonic()
+                    stream.expected_chunk += 1
+                    if number >= total_chunks:
+                        with streams_dict_lock:
+                            active_streams.pop(key, None)
+                        _close_stream(stream, suppress_close_error=False)
+                except Exception:
+                    with streams_dict_lock:
+                        active_streams.pop(key, None)
+                    _close_stream(stream, suppress_close_error=True)
+                    raise
+                return
+            # Out-of-order chunk: close streaming handle and fall back to seek+write
+            with streams_dict_lock:
+                active_streams.pop(key, None)
+            _close_stream(stream, suppress_close_error=True)
+
+    # Fallback for out-of-order or resumed chunk writes.
+    stream_sess = data_objects.sess.clone()
+    stream_sess.numThreads = 1
+    fallback_opts: dict[str, Any] = {}
+    if resource:
+        fallback_opts[kw.DEST_RESC_NAME_KW] = resource
+    try:
+        with stream_sess.data_objects.open(path, 'a', **fallback_opts) as fd:
+            fd.seek(int(size * (number - 1)))
+            if data:
+                fd.write(data)
+    finally:
+        with suppress(Exception):
+            stream_sess.cleanup()
 
 
 @research_bp.route('/')
@@ -415,40 +406,22 @@ def upload_post() -> Response:
     if flow_total_size is None and flow_total_chunks == 1:
         flow_total_size = len(encode_unicode_content)
 
-    # Write chunk data via streaming writer (avoids data_objects.truncate(), which is unsupported
-    # on S3 resources, and streams multi-chunk uploads without O(k^2) S3 cache re-downloads).
-    q.put(Chunk(
-        g.irods.data_objects,
-        object_path,
-        flow_chunk_number,
-        flow_chunk_size,
-        encode_unicode_content,
-        app.config.get('IRODS_DEFAULT_RESC'),
-        flow_id=flow_identifier,
-        total_chunks=flow_total_chunks,
-        total_size=flow_total_size,
-    ))
-
-    # check at the end, and after every Gb
-    if flow_total_chunks == flow_chunk_number:
-        need_to_check_flow = True
-    else:
-        flow_check_byte_interval = 2**30  # Check upload flow (at least) every 1 GB
-        flow_check_chunk_interval = int(flow_check_byte_interval / min(flow_chunk_size, flow_check_byte_interval))
-        need_to_check_flow = flow_chunk_number % flow_check_chunk_interval == 0
-
-    if need_to_check_flow:
-        q.put(Chunk(None, None, 0, 0, None, None))
-        q.join()
-
-    stream_key = (flow_identifier, object_path)
-    with failed_streams_lock:
-        has_failed = stream_key in failed_streams
-        if has_failed and flow_total_chunks == flow_chunk_number:
-            failed_streams.discard(stream_key)
-
-    if has_failed:
-        # Failure in upload writer thread.
+    # Write chunk directly on this WSGI thread using per-stream locking (avoids global writer
+    # thread head-of-line blocking, avoids truncate() on S3, and streams without O(k^2) caching).
+    try:
+        _write_chunk_direct(
+            g.irods.data_objects,
+            object_path,
+            flow_chunk_number,
+            flow_chunk_size,
+            encode_unicode_content,
+            app.config.get('IRODS_DEFAULT_RESC'),
+            flow_id=flow_identifier,
+            total_chunks=flow_total_chunks,
+            total_size=flow_total_size,
+        )
+    except Exception as exc:
+        log_error(f"Chunk upload failed for {object_path}: {exc}")
         response = make_response(jsonify({"message": "Chunk upload failed"}), 500)
         response.headers["Content-Type"] = "application/json"
         return response
