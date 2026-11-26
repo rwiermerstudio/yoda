@@ -8,7 +8,8 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         "irods-resource-plugin-s3=${IRODS_S3_PLUGIN_VERSION}" \
-        python3-boto3 && \
+        python3-boto3 \
+        patch && \
     rm -rf /var/lib/apt/lists/*
 
 # Tune checksum_read_buffer_size_in_bytes to 10 MiB as recommended for S3 resources
@@ -19,5 +20,9 @@ COPY docker/compose-s3/migrate_to_s3.py /var/lib/irods/scripts/migrate_to_s3.py
 COPY docker/compose-s3/s3-provider-init.sh /var/lib/irods/scripts/s3-provider-init.sh
 RUN chmod 0755 /var/lib/irods/scripts/migrate_to_s3.py /var/lib/irods/scripts/s3-provider-init.sh && \
     chown irods:irods /var/lib/irods/scripts/migrate_to_s3.py
+
+
+COPY patches/yoda-ruleset-perf-re-pep-guards.patch /tmp/yoda-ruleset-perf-re-pep-guards.patch
+RUN patch -p1 -d /etc/irods/yoda-ruleset < /tmp/yoda-ruleset-perf-re-pep-guards.patch && rm -f /tmp/yoda-ruleset-perf-re-pep-guards.patch
 
 CMD ["/bin/bash", "-c", "exec /var/lib/irods/scripts/s3-provider-init.sh \"${TAG}\""]
