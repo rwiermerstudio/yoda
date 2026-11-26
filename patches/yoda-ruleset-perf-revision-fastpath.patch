@@ -1,0 +1,64 @@
+--- a/revisions.py	2026-11-25 16:13:35.550714358 +0000
++++ b/revisions.py	2026-11-26 09:03:21.447758990 +0000
+@@ -5,6 +5,7 @@
+ __license__   = 'GPLv3, see LICENSE'
+ 
+ import datetime
++import fnmatch
+ import os
+ import random
+ import re
+@@ -244,6 +245,21 @@
+     return api.Result.ok()
+ 
+ 
++_REVISION_STORE_CACHE: dict[tuple[str, str], tuple[float, str | None]] = {}
++_REVISION_STORE_CACHE_TTL_SEC = 60.0
++
++
++def _get_revision_store_cached(ctx: rule.Context, group_name: str) -> str | None:
++    cache_key = (user.zone(ctx), group_name)
++    now = time.monotonic()
++    cached = _REVISION_STORE_CACHE.get(cache_key)
++    if cached is not None and (now - cached[0]) < _REVISION_STORE_CACHE_TTL_SEC:
++        return cached[1]
++    store = get_revision_store(ctx, group_name)
++    _REVISION_STORE_CACHE[cache_key] = (now, store)
++    return store
++
++
+ def resource_modified_post_revision(ctx: rule.Context, resource: str, zone: str, path: str) -> None:
+     """Create revisions on file modifications.
+ 
+@@ -256,16 +272,24 @@
+     :param zone:     Zone where the original can be found
+     :param path:     Path of the original
+     """
++    # Fast-path: reject non-research paths and blocklisted filenames (e.g. .part)
++    # before issuing any iCAT GenQueries.
++    if not path.startswith(f"/{zone}/home/{constants.IIGROUPPREFIX}"):
++        return
++    basename = pathutil.basename(path)
++    if any(fnmatch.fnmatch(basename, pattern) for pattern in constants.UUBLOCKLIST):
++        return
++
+     size = data_object.size(ctx, path)
++    if size is None or int(size) > constants.UUMAXREVISIONSIZE:
++        return
++
+     groups = data_object.get_group_owners(ctx, path)
+-    if groups:
+-        revision_store = get_revision_store(ctx, groups[0][0])
+-        revision_store_exists = revision_store is not None
+-    else:
+-        revision_store_exists = False
++    if len(groups) != 1:
++        return
+ 
+-    should_create_rev, _ = revision_eligible(constants.UUMAXREVISIONSIZE, size is not None, size, path, groups, revision_store_exists)
+-    if not should_create_rev:
++    revision_store = _get_revision_store_cached(ctx, groups[0][0])
++    if revision_store is None:
+         return
+ 
+     revision_avu_name = constants.UUORGMETADATAPREFIX + "revision_scheduled"
