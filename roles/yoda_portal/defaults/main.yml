@@ -29,6 +29,7 @@ yoda_theme_mapping:
   wur: "Wageningen University & Research"
 
 # Yoda portal
+yoda_portal_repo: "https://github.com/UtrechtUniversity/yoda-portal.git"
 yoda_portal_version: "{{ yoda_version }}"
 yoda_portal_log_api_call_duration: false
 yoda_portal_path: /var/www/yoda              # Path to location of portal
@@ -66,6 +67,7 @@ portal_session_cookie_samesite: Strict             # 'Strict' (no OIDC, or OIDC 
 # Research module configuration
 enable_research: true                              # Enable research module
 yoda_portal_upload_part_files: true                # Allow use of .part data objects for the portal upload function
+yoda_portal_s3_workspace_patch: false              # Apply S3-compatible streaming upload patch to research module
 
 # OpenSearch module configuration
 enable_open_search: false                          # Enable OpenSearch module

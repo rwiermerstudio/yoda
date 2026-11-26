@@ -31,6 +31,7 @@ irods_icat_caching_settings:
 
 irods_delay_server_sleep_time_in_seconds: 10
 irods_number_of_concurrent_delay_rule_executors: 4
+irods_checksum_read_buffer_size_in_bytes: 1048576
 
 irods_rum_job_enabled: true
 irods_rum_job_hour: 20

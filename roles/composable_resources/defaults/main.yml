@@ -3,6 +3,8 @@
 
 irods_service_account: irods
 irods_default_resc: irodsResc              # iRODS default resource name
+irods_vault_directory: /var/lib/irods/Vault
+irods_modify_resources: false
 
 yoda_environment: development
 

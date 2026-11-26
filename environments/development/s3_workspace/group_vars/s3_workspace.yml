@@ -1,0 +1,280 @@
+---
+# copyright Utrecht University
+# Pure S3 Yoda Workspace + Vault test environment (zero unixfilesystem resources).
+
+# Ansible configuration
+ansible_user: vagrant                             # Administrative user on instance for Ansible
+ansible_ssh_private_key_file: vagrant/ssh/vagrant # Path to private key file of administrative user
+ansible_python_interpreter: /usr/bin/python3      # Path to Python interpreter on the target host
+
+# Workaround for resource creation on EL 9 systems (see YDA-6324)
+common_custom_dns_enable: true
+
+# Yoda configuration
+instance: s3_workspace                             # Name of Yoda instance, as defined in hosts file
+yoda_version: development                          # Git branch, for example: development or release-1.8
+yoda_environment: development                      # Yoda environment: development, testing, acceptance or production
+yoda_portal_fqdn: portal.yoda.test                 # Yoda Portal fully qualified domain name (FQDN)
+yoda_davrods_fqdn: data.yoda.test                  # Yoda Davrods WebDAV fully qualified domain name (FQDN)
+yoda_davrods_anonymous_enabled: true
+yoda_davrods_anonymous_fqdn: public.data.yoda.test # Yoda Davrods anonymous WebDAV fully qualified domain name (FQDN)
+yoda_davrods_anonymous_host: combined.yoda.test    # Yoda Davrods anonymous WebDav host (for Anubis)
+
+default_yoda_schema: default-3                     # Default Yoda metadata scheme: core-2 or default-3
+yoda_prefix: UU01                                  # Prefix for internal portion of persistent identifier
+update_schemas: 1                                  # Update already installed schemas, formelements and stylesheets: yes (1) or no (0)
+credential_files: PLACEHOLDER                      # Location of Yoda credentials files
+
+# Anubis configuration
+enable_anubis: false                               # Enable Anubis
+anubis_redis_password: PLACEHOLDER                 # Password for the Redis instance used by Anubis
+anubis_ed25519_private_key: 6df19fb7373c1582789d279218147adce2422b80c0fd3389f52d390490e338e9
+
+# Text file extensions configuration
+text_file_extensions: ['bash', 'csv', 'c', 'cpp', 'csharp', 'css', 'diff', 'fortran', 'gams', 'gauss', 'go', 'graphql', 'ini', 'irpf90', 'java', 'js', 'json', 'julia', 'julia-repl', 'kotlin', 'less', 'lua', 'makefile', 'markdown', 'md', 'mathematica', 'matlab', 'maxima', 'mizar', 'objectivec', 'openscad', 'perl', 'php', 'php-template', 'plaintext', 'txt', 'python', 'py', 'python-repl', 'r', 'ruby', 'rust', 'sas', 'scilab', 'scss', 'shell', 'sh', 'sql', 'stan', 'stata', 'swift', 'typescript', 'ts', 'vbnet', 'wasm', 'xml', 'yaml', 'html']
+
+# Research module configuration (S3 streaming patch enabled)
+enable_research: true                              # Enable research module
+yoda_portal_s3_workspace_patch: true               # Enable S3-compatible streaming upload & overwrite fix
+yoda_portal_upload_part_files: true                # Decoupled S3 naming makes .part -> final rename metadata-only
+
+# OpenSearch module configuration
+enable_open_search: false
+opensearch_server: combined.yoda.test
+
+# Deposit module configuration
+enable_deposit: true                               # Enable deposit module
+
+# Datarequest module configuration
+enable_datarequest: true                           # Enable datarequest module
+datarequest_help_contact_name: PLACEHOLDER         # Help contact name
+datarequest_help_contact_email: PLACEHOLDER        # Help contact email
+
+# Data Package Reference
+enable_data_package_reference: true                # Enable Data Package References for vault data packages
+
+# Data Access Tokens
+enable_tokens: true                                     # Enable data access tokens for webDAV and iCommands
+token_database: /etc/irods/yoda-ruleset/accesstokens.db # Location of the database that contain the tokens
+token_database_password: test                           # Token database password
+token_length: 32                                        # Length of data access tokens
+token_lifetime: 72                                      # Lifetime of data access tokens (in hours)
+
+# Data Package Archive
+enable_data_package_archive: false
+data_package_archive_fqdn: "{{ irods_resource_fqdn }}"
+data_package_archive_minimum: 1024
+data_package_archive_maximum: -1
+data_package_archive_resource: mockDataArchive
+
+# iRODS check tooling
+enable_irods_consistency_check: true
+enable_icat_database_checker: true
+
+# Portal customization
+yoda_theme_path: /var/www/yoda/themes
+yoda_theme: uu
+portal_title_text: Yoda - S3 Workspace Test
+yoda_portal_log_api_call_duration: true
+enable_portal_caching: true
+
+# iRODS configuration
+irods_password: rods                       # iRODS admin password
+irods_database_password: irodsdev          # The password for the iRODS database username
+irods_zone: tempZone                       # The name of the iRODS Zone
+irods_icat_fqdn: combined.yoda.test        # iRODS iCAT fully qualified domain name (FQDN)
+irods_database_fqdn: combined.yoda.test    # iRODS database fully qualified domain name (FQDN)
+irods_resource_fqdn: combined.yoda.test    # iRODS resource fully qualified domain name (FQDN)
+irods_ssl_verify_server: none              # Verify TLS certificate, use 'cert' for acceptance and production
+irods_enable_gocommands: false
+irods_ca_certificate_file: "/etc/irods/{{ openssl_crt_signed_and_chain }}"
+irods_checksum_read_buffer_size_in_bytes: 10485760 # 10 MiB buffer to avoid S3 GetObject rate limits on checksums
+irods_modify_resources: true
+
+# Pure S3 composable resource hierarchy (Workspace + Vault both on cacheless S3; zero unixfilesystem resources)
+irods_default_resc: irodsResc
+resource_research: irodsResc
+resource_vault: irodsRescVaultS3
+
+irods_resources:
+  - name: s3_workspace_1
+    resource_type: s3
+    host: "{{ irods_icat_fqdn }}"
+    vault_path: /yoda/workspace
+    context: "S3_DEFAULT_HOSTNAME=localhost:9000;S3_AUTH_FILE=/var/lib/irods/.s3auth;S3_REGIONNAME=local-s3;S3_RETRY_COUNT=3;S3_WAIT_TIME_SECONDS=2;S3_PROTO=HTTP;ARCHIVE_NAMING_POLICY=decoupled;HOST_MODE=cacheless_attached;S3_CACHE_DIR=/dev/shm/irods-s3-cache"
+
+  - name: s3_workspace_p1
+    resource_type: passthru
+    children:
+      - s3_workspace_1
+
+  - name: s3_workspace
+    resource_type: random
+    children:
+      - s3_workspace_p1
+
+  - name: irodsResc
+    resource_type: random
+    children:
+      - s3_workspace
+
+  - name: s3_vault_1
+    resource_type: s3
+    host: "{{ irods_icat_fqdn }}"
+    vault_path: /yoda/vault
+    context: "S3_DEFAULT_HOSTNAME=localhost:9000;S3_AUTH_FILE=/var/lib/irods/.s3auth;S3_REGIONNAME=local-s3;S3_RETRY_COUNT=3;S3_WAIT_TIME_SECONDS=2;S3_PROTO=HTTP;ARCHIVE_NAMING_POLICY=decoupled;HOST_MODE=cacheless_attached;S3_CACHE_DIR=/dev/shm/irods-s3-cache"
+
+  - name: s3_vault_p1
+    resource_type: passthru
+    children:
+      - s3_vault_1
+
+  - name: s3_vault
+    resource_type: random
+    children:
+      - s3_vault_p1
+
+  - name: irodsRescVaultS3
+    resource_type: random
+    children:
+      - s3_vault
+
+# Replication configuration (disabled by default since S3 provides backend object durability)
+enable_async_replication: 0
+irods_repl_resc: []
+
+async_replication_delay_time: 3600
+vault_copy_backoff_time: 300
+
+# Automatic resource balancing (disabled: ARB only applies to unixfilesystem resources)
+irods_arb_enabled: false
+irods_arb_exempt_resources: ""
+irods_arb_min_gb_free: 0
+irods_arb_min_percent_free: 5
+
+# S3 configuration (cache fallback placed on tmpfs /dev/shm so zero block storage is touched)
+enable_s3_resource: true
+s3_access_key: minioadmin
+s3_secret_key: minioadmin
+s3_hostname: localhost:9000
+s3_cache_dir: /dev/shm/irods-s3-cache
+
+# NFS configuration (disabled)
+enable_nfs_resource: false
+
+# Mail notifications
+send_notifications: 1
+notifications_sender_email: noreply@yoda.test
+notifications_reply_to: noreply@yoda.test
+smtp_server: smtp://localhost:25
+smtp_auth: false
+smtp_starttls: false
+
+# DataCite Configuration
+datacite_rest_api_url: datacite-mock.yoda.test
+datacite_username: PLACEHOLDER
+datacite_password: PLACEHOLDER
+datacite_prefix: 10.00012
+datacite_publisher: Yoda development team
+datacite_tls_verify: 0
+
+# EPIC PID Configuration
+epic_url: PLACEHOLDER
+epic_handle_prefix: PLACEHOLDER
+
+# Zabbix configuration
+zabbix_server: PLACEHOLDER
+
+# Public host configuration
+yoda_public_host: combined.yoda.test
+yoda_public_fqdn: public.yoda.test
+
+# Yoda public upload private key (base64 encoded, development only)
+upload_priv_key: |
+  LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFB
+  QUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhP
+  UUFBQUNDTGlhY01DT2xPZzNpSFg4VXdYOHpWUk11cFB2Y2NyTTdmQUNodU9WMi80UUFBQUpoQTVj
+  YTlRT1hHCnZRQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDQ0xpYWNNQ09sT2czaUhYOFV3WDh6VlJN
+  dXBQdmNjck03ZkFDaHVPVjIvNFEKQUFBRUFtRng0MmVDSDBYOHFHaXpmUmFpcFJWa3MzcVo1OWda
+  SU92TUJkZy85SnhZdUpwd3dJNlU2RGVJZGZ4VEJmek5WRQp5NmsrOXh5c3p0OEFLRzQ1WGIvaEFB
+  QUFEbWx5YjJSelFHTnZiV0pwYm1Wa0FRSURCQVVHQnc9PQotLS0tLUVORCBPUEVOU1NIIFBSSVZB
+  VEUgS0VZLS0tLS0K
+
+# Yoda public upload public key (base64 encoded, development only)
+upload_pub_key: |
+  c3NoLWVkMjU1MTkgQUFBQUMzTnphQzFsWkRJMU5URTVBQUFBSUl1SnB3d0k2VTZEZUlkZnhUQmZ6
+  TlZFeTZrKzl4eXN6dDhBS0c0NVhiL2ggaXJvZHNAY29tYmluZWQK
+
+# External user service configuration
+yoda_eus_fqdn: eus.yoda.test
+eus_api_fqdn: api.eus.yoda.test
+eus_api_secret: PLACEHOLDER
+eus_api_tls_verify: false
+eus_db_password: PLACEHOLDER
+eus_smtp_from_address: yoda@yoda.test
+eus_smtp_replyto_address: yoda@yoda.test
+eus_mail_template: uu
+external_users_domain_filter: '*.yoda.dev'
+
+portal_session_cookie_samesite: Lax
+
+# OpenID Connect configuration (for TESTING purposes)
+oidc_active: true
+oidc_domains: ['*.yoda.dev']
+oidc_always_redirect: false
+oidc_client_id: myClientId
+oidc_client_secret: myClientPassword
+oidc_auth_base_uri: https://oauth.wiremockapi.cloud/oauth/authorize
+oidc_token_uri: https://oauth.wiremockapi.cloud/oauth/token
+oidc_userinfo_uri: https://oauth.wiremockapi.cloud/userinfo
+oidc_scopes: openid
+oidc_acr_values: ""
+oidc_email_field: email
+oidc_jwks_uri: https://oauth.wiremockapi.cloud/.well-known/jwks.json
+oidc_jwt_issuer: https://oauth.wiremockapi.cloud
+oidc_req_exp: true
+oidc_req_iat: false
+oidc_req_nbf: false
+oidc_verify_aud: true
+oidc_verify_iat: false
+oidc_verify_exp: true
+oidc_verify_iss: true
+
+# SRAM configuration (for TESTING purposes)
+enable_sram: true
+sram_rest_api_url: sram-mock.yoda.test
+sram_api_key: PLACEHOLDER
+sram_service_entity_id: PLACEHOLDER
+sram_auto_external_users_co_sync: false
+sram_auto_group_sync: false
+sram_verbose_logging: true
+sram_tls_verify: false
+sram_co_default_label: PLACEHOLDER
+sram_co_default_admins: ['sram-admin@yoda.test']
+sram_external_users_co: 76f1e2c9-a548-4019-a281-ece2da3fd642
+
+sram_oidc_client_id: myClientId
+sram_oidc_client_secret: myClientPassword
+sram_oidc_auth_base_uri: https://oauth.wiremockapi.cloud/oauth/authorize
+sram_oidc_token_uri: https://oauth.wiremockapi.cloud/oauth/token
+sram_oidc_userinfo_uri: https://oauth.wiremockapi.cloud/userinfo
+sram_oidc_scopes: openid
+sram_oidc_acr_values: ""
+sram_oidc_email_field: email
+sram_oidc_jwks_uri: https://oauth.wiremockapi.cloud/.well-known/jwks.json
+sram_oidc_jwt_issuer: https://oauth.wiremockapi.cloud
+sram_oidc_req_exp: true
+sram_oidc_req_iat: false
+sram_oidc_req_nbf: false
+sram_oidc_verify_aud: true
+sram_oidc_verify_iat: false
+sram_oidc_verify_exp: true
+sram_oidc_verify_iss: true
+
+# Mail configuration
+enable_mailpit: true
+enable_postfix: false
+enable_yoda_report: false
+
+# yoda-clienttools
+enable_yoda_clienttools: false

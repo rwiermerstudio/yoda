@@ -35,7 +35,7 @@ def main():
             children=dict(default=None, type="list"),
             resource_type=dict(default=None),
             context=dict(default=None),
-            modify=dict(default=False),
+            modify=dict(default=False, type="bool"),
             state=dict(default="present"),
         ),
         supports_check_mode=True,

@@ -30,3 +30,23 @@
     group: '{{ irods_service_account }}'
     mode: '0600'
   no_log: true
+
+
+- name: Ensure S3 cache directory is present
+  ansible.builtin.file:
+    path: '{{ s3_cache_dir }}'
+    state: directory
+    owner: '{{ irods_service_account }}'
+    group: '{{ irods_service_account }}'
+    mode: '0700'
+  when: s3_cache_dir != '/tmp'
+
+
+- name: Ensure S3 cache directory persists across reboots via tmpfiles.d
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/irods-s3-cache.conf
+    content: "d {{ s3_cache_dir }} 0700 {{ irods_service_account }} {{ irods_service_account }} -\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when: s3_cache_dir != '/tmp'

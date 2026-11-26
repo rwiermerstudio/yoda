@@ -1,0 +1,287 @@
+diff --git a/research/research.py b/research/research.py
+index 298f7c9..a0462d6 100644
+--- a/research/research.py
++++ b/research/research.py
+@@ -7,10 +7,13 @@ __license__   = 'GPLv3, see LICENSE'
+ import os
+ import queue
+ import threading
++import time
+ from contextlib import suppress
+-from typing import Optional
++from dataclasses import dataclass
++from typing import Any, Optional
+ from urllib.parse import parse_qs, urlparse
+ 
++import irods.keywords as kw
+ import magic
+ from flask import (
+     Blueprint,
+@@ -25,6 +28,7 @@ from flask import current_app as app
+ from irods.exception import CAT_NO_ROWS_FOUND
+ from irods.manager.data_object_manager import DataObjectManager
+ from irods.message import iRODSMessage
++from irods.session import iRODSSession
+ 
+ import api
+ from cache_config import cache_view
+@@ -35,6 +39,17 @@ research_bp = Blueprint('research_bp', __name__,
+                         static_folder='static/research',
+                         static_url_path='/assets')
+ 
++STALE_STREAM_TIMEOUT_SEC = 300.0
++PUT_OPR = 1
++
++
++@dataclass
++class _OpenUpload:
++    session: iRODSSession
++    handle: Any
++    expected_chunk: int
++    last_activity: float
++
+ 
+ class Chunk:
+     def __init__(self,
+@@ -42,41 +57,157 @@ class Chunk:
+                  path: Optional[str],
+                  number: int,
+                  size: int,
+-                 data: Optional[str],
+-                 resource: Optional[str]) -> None:
++                 data: Optional[bytes],
++                 resource: Optional[str],
++                 flow_id: Optional[str] = None,
++                 total_chunks: int = 1,
++                 total_size: Optional[int] = None) -> None:
+         self.data_objects: Optional[DataObjectManager] = data_objects
+         self.path: Optional[str] = path
+         self.number: int = number
+         self.size: int = size
+-        self.data: Optional[str] = data
++        self.data: Optional[bytes] = data
+         self.resource: Optional[str] = resource
++        self.flow_id: Optional[str] = flow_id
++        self.total_chunks: int = total_chunks
++        self.total_size: Optional[int] = total_size
+ 
+ 
+ q: queue.Queue[Chunk] = queue.Queue(4)
+-r: queue.Queue[bool] = queue.Queue(1)
++active_streams: dict[tuple[str, str], _OpenUpload] = {}
++failed_streams: set[tuple[str, str]] = set()
++failed_streams_lock = threading.Lock()
++
++
++def _close_stream(stream: _OpenUpload, suppress_close_error: bool = True) -> None:
++    try:
++        if suppress_close_error:
++            with suppress(Exception):
++                stream.handle.close()
++        else:
++            stream.handle.close()
++    finally:
++        with suppress(Exception):
++            stream.session.cleanup()
++
++
++def _reap_stale_streams() -> None:
++    now = time.monotonic()
++    stale_keys = [
++        key for key, stream in active_streams.items()
++        if now - stream.last_activity > STALE_STREAM_TIMEOUT_SEC
++    ]
++    for key in stale_keys:
++        stream = active_streams.pop(key, None)
++        if stream is not None:
++            log_error(f"Closing stale upload stream for {key[1]}")
++            _close_stream(stream, suppress_close_error=True)
+ 
+ 
+ def irods_writer() -> None:
+-    failure = False
+     while True:
+-        chunk = q.get()
+-        if chunk.path and chunk.data_objects is not None:
+-            if not failure:
++        try:
++            chunk = q.get(timeout=30.0)
++        except queue.Empty:
++            _reap_stale_streams()
++            continue
++
++        try:
++            _reap_stale_streams()
++            if chunk.path and chunk.data_objects is not None:
++                key = (chunk.flow_id or chunk.path, chunk.path)
++
++                if chunk.number == 1:
++                    with failed_streams_lock:
++                        failed_streams.discard(key)
++                    existing = active_streams.pop(key, None)
++                    if existing is not None:
++                        _close_stream(existing, suppress_close_error=True)
++                else:
++                    with failed_streams_lock:
++                        if key in failed_streams:
++                            continue
++
++                stream_sess: Optional[iRODSSession] = None
++                obj_desc: Any = None
+                 try:
+-                    with chunk.data_objects.open(chunk.path, 'a', chunk.resource) as obj_desc:
+-                        obj_desc.seek(int(chunk.size * (chunk.number - 1)))
+-                        obj_desc.write(chunk.data)
+-                except Exception:
+-                    failure = True
+-                    log_error(f"Chunk upload failed for {chunk.path}")
+-                finally:
+-                    with suppress(Exception):
+-                        obj_desc.close()
+-            else:
+-                # Report back about failures.
+-                r.put(failure)
+-                failure = False
+-        q.task_done()
++                    if chunk.number == 1:
++                        # Clone session so connman GC cannot disconnect an active multi-chunk stream
++                        # and isolate numThreads=1 for single-stream cacheless S3 multipart upload.
++                        stream_sess = chunk.data_objects.sess.clone()
++                        stream_sess.numThreads = 1
++                        open_opts: dict[str, Any] = {
++                            kw.OPR_TYPE_KW: PUT_OPR,
++                            kw.NUM_THREADS_KW: '1',
++                        }
++                        if chunk.resource:
++                            open_opts[kw.DEST_RESC_NAME_KW] = chunk.resource
++                        if chunk.total_size is not None and chunk.total_size >= 0:
++                            open_opts[kw.DATA_SIZE_KW] = str(chunk.total_size)
++
++                        # Opening with 'w' sets O_WRONLY | O_CREAT | O_TRUNC, replacing existing
++                        # objects on both S3 and unixfilesystem without needing RESOURCE_OP_TRUNCATE.
++                        obj_desc = stream_sess.data_objects.open(chunk.path, 'w', **open_opts)
++                        if chunk.data:
++                            obj_desc.write(chunk.data)
++
++                        if chunk.total_chunks <= 1:
++                            try:
++                                obj_desc.close()
++                            finally:
++                                with suppress(Exception):
++                                    stream_sess.cleanup()
++                        else:
++                            active_streams[key] = _OpenUpload(
++                                session=stream_sess,
++                                handle=obj_desc,
++                                expected_chunk=2,
++                                last_activity=time.monotonic(),
++                            )
++                    else:
++                        stream = active_streams.get(key)
++                        if stream is not None and chunk.number == stream.expected_chunk:
++                            if chunk.data:
++                                stream.handle.write(chunk.data)
++                            stream.last_activity = time.monotonic()
++                            stream.expected_chunk += 1
++                            if chunk.number >= chunk.total_chunks:
++                                active_streams.pop(key, None)
++                                _close_stream(stream, suppress_close_error=False)
++                        else:
++                            # Fallback for out-of-order or resumed chunk writes.
++                            if stream is not None:
++                                active_streams.pop(key, None)
++                                _close_stream(stream, suppress_close_error=True)
++                            stream_sess = chunk.data_objects.sess.clone()
++                            stream_sess.numThreads = 1
++                            fallback_opts: dict[str, Any] = {}
++                            if chunk.resource:
++                                fallback_opts[kw.DEST_RESC_NAME_KW] = chunk.resource
++                            try:
++                                with stream_sess.data_objects.open(chunk.path, 'a', **fallback_opts) as fd:
++                                    fd.seek(int(chunk.size * (chunk.number - 1)))
++                                    if chunk.data:
++                                        fd.write(chunk.data)
++                            finally:
++                                with suppress(Exception):
++                                    stream_sess.cleanup()
++                except Exception as exc:
++                    log_error(f"Chunk upload failed for {chunk.path}: {exc}")
++                    aborted = active_streams.pop(key, None)
++                    if aborted is not None:
++                        _close_stream(aborted, suppress_close_error=True)
++                    else:
++                        if obj_desc is not None:
++                            with suppress(Exception):
++                                obj_desc.close()
++                        if stream_sess is not None:
++                            with suppress(Exception):
++                                stream_sess.cleanup()
++                    with failed_streams_lock:
++                        failed_streams.add(key)
++        finally:
++            q.task_done()
+ 
+ 
+ threading.Thread(target=irods_writer, name='irods-writer', daemon=True).start()
+@@ -256,6 +387,7 @@ def upload_post() -> Response:
+     flow_chunk_number = request.form.get('flowChunkNumber', type=int)
+     flow_total_chunks = request.form.get('flowTotalChunks', type=int)
+     flow_chunk_size = request.form.get('flowChunkSize', type=int)
++    flow_total_size = request.form.get('flowTotalSize', type=int)
+     flow_relative_path = request.form.get('flowRelativePath', type=str)
+ 
+     flow_filename = request.form.get('flowFilename', type=str)
+@@ -280,28 +412,21 @@ def upload_post() -> Response:
+     chunk_data = request.files['file']
+     encode_unicode_content = iRODSMessage.encode_unicode(chunk_data.stream.read())
+ 
+-    # Truncate the existing data object, if present. This ensures that overwriting an
+-    # existing data object with a smaller file works as expected.
+-    if flow_chunk_number == 1:
+-        try:
+-            g.irods.data_objects.truncate(object_path, 0)
+-        except CAT_NO_ROWS_FOUND:
+-            # No file was present, which is okay.
+-            pass
+-        except Exception as e:
+-            log_error(f"Error occurred when truncating existing object on upload at {object_path} ({str(type(e))}:{str(e)})")
+-            response = make_response(jsonify({"message": "Upload failed when truncating existing data object."}), 500)
+-            response.headers["Content-Type"] = "application/json"
+-            return response
++    if flow_total_size is None and flow_total_chunks == 1:
++        flow_total_size = len(encode_unicode_content)
+ 
+-    # Write chunk data.
++    # Write chunk data via streaming writer (avoids data_objects.truncate(), which is unsupported
++    # on S3 resources, and streams multi-chunk uploads without O(k^2) S3 cache re-downloads).
+     q.put(Chunk(
+         g.irods.data_objects,
+         object_path,
+         flow_chunk_number,
+         flow_chunk_size,
+         encode_unicode_content,
+-        app.config.get('IRODS_DEFAULT_RESC')
++        app.config.get('IRODS_DEFAULT_RESC'),
++        flow_id=flow_identifier,
++        total_chunks=flow_total_chunks,
++        total_size=flow_total_size,
+     ))
+ 
+     # check at the end, and after every Gb
+@@ -316,9 +441,14 @@ def upload_post() -> Response:
+         q.put(Chunk(None, None, 0, 0, None, None))
+         q.join()
+ 
+-    if not r.empty():
++    stream_key = (flow_identifier, object_path)
++    with failed_streams_lock:
++        has_failed = stream_key in failed_streams
++        if has_failed and flow_total_chunks == flow_chunk_number:
++            failed_streams.discard(stream_key)
++
++    if has_failed:
+         # Failure in upload writer thread.
+-        r.get()
+         response = make_response(jsonify({"message": "Chunk upload failed"}), 500)
+         response.headers["Content-Type"] = "application/json"
+         return response

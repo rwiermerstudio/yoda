@@ -1,0 +1,68 @@
+#######################
+# S3 Workspace instance
+#######################
+# Define all hosts in instance here:
+[s3_workspace:children]
+s3_workspace_portal
+s3_workspace_database
+s3_workspace_icat
+s3_workspace_resource
+s3_workspace_public
+s3_workspace_eus
+
+# Define portal host here:
+[s3_workspace_portal]
+combined.yoda.test
+
+# Define database host here:
+[s3_workspace_database]
+combined.yoda.test
+
+# Define icat host here:
+[s3_workspace_icat]
+combined.yoda.test
+
+# Define resource host here:
+[s3_workspace_resource]
+
+# Define public host here:
+[s3_workspace_public]
+combined.yoda.test
+
+# Define external user service host here:
+[s3_workspace_eus]
+combined.yoda.test
+
+###############
+# All instances
+###############
+# Define all portal hosts here:
+[portals:children]
+s3_workspace_portal
+
+# Define all database hosts here:
+[databases:children]
+s3_workspace_database
+
+# Define all icat hosts here:
+[icats:children]
+s3_workspace_icat
+
+# Define all resource hosts here:
+[resources:children]
+s3_workspace_resource
+
+# Define all public hosts here:
+[publics:children]
+s3_workspace_public
+
+# Define external user service host here:
+[eus:children]
+s3_workspace_eus
+
+# Provision instances with test data:
+[test:children]
+s3_workspace_icat
+
+[development:children]
+s3_workspace

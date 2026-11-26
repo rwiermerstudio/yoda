@@ -1,0 +1,13 @@
+diff --git a/ichk/s3_resource_interface.py b/ichk/s3_resource_interface.py
+index a4f18d3..44706a0 100644
+--- a/ichk/s3_resource_interface.py
++++ b/ichk/s3_resource_interface.py
+@@ -47,7 +47,7 @@ class S3ResourceInterface(ResourceInterface):
+         return path.split("/")[1]
+ 
+     def _get_key_name(self, path):
+-        return "Vault/" + "/".join(path.split("/")[3:])
++        return "/".join(path.split("/")[2:])
+ 
+     def check_coll_exists(self, path):
+         # Collections do not exist separately from objects on S3 resources

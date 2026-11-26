@@ -25,6 +25,7 @@ irods_resource_caching_settings:
 
 irods_delay_server_sleep_time_in_seconds: 10
 irods_number_of_concurrent_delay_rule_executors: 4
+irods_checksum_read_buffer_size_in_bytes: 1048576
 
 # OpenSSL configuration
 openssl_dhparams: dhparams.pem

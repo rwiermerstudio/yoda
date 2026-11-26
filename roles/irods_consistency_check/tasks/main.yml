@@ -20,3 +20,23 @@
     name: "git+https://github.com/UtrechtUniversity/irods-consistency-check.git@v{{ irods_consistency_check_version }}"
     virtualenv: '/var/lib/irods/irods-consistency-check'
     virtualenv_python: python3
+
+
+- name: Locate ichk s3_resource_interface.py in virtualenv
+  ansible.builtin.find:
+    paths: /var/lib/irods/irods-consistency-check/lib
+    patterns: s3_resource_interface.py
+    recurse: true
+  register: ichk_s3_files
+  when: not ansible_check_mode
+
+
+- name: Patch ichk S3 key resolution for arbitrary S3 vault_path prefixes
+  become_user: '{{ irods_service_account }}'
+  become: true
+  ansible.builtin.replace:
+    path: "{{ item.path }}"
+    regexp: 'return "Vault/" \+ "/"\.join\(path\.split\("/"\)\[3:\]\)'
+    replace: 'return "/".join(path.split("/")[2:])'
+  loop: "{{ ichk_s3_files.files | default([]) }}"
+  when: not ansible_check_mode

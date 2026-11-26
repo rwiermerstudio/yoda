@@ -59,11 +59,26 @@
   become_user: "{{ yoda_deployment_user }}"
   become: true
   ansible.builtin.git:
-    repo: "https://github.com/UtrechtUniversity/yoda-portal.git"
+    repo: "{{ yoda_portal_repo }}"
     dest: "/var/www/yoda"
     version: "{{ yoda_portal_version }}"
     force: "yes"
   register: portalchanges
+  notify:
+    - Restart Apache webserver
+    - Restart portal application
+
+
+- name: Apply S3-compatible streaming upload patch to Yoda portal
+  become_user: "{{ yoda_deployment_user }}"
+  become: true
+  ansible.builtin.copy:
+    src: s3_research.py
+    dest: /var/www/yoda/research/research.py
+    owner: "{{ yoda_deployment_user }}"
+    group: "{{ yoda_deployment_user }}"
+    mode: '0644'
+  when: yoda_portal_s3_workspace_patch | bool
   notify:
     - Restart Apache webserver
     - Restart portal application

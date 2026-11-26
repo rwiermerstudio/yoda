@@ -1,0 +1,166 @@
+volumes:
+  extuser_pg_data:
+  icat_pg_data:
+  public_metadata:
+  public_landingpages:
+  s3_data:
+
+services:
+  s3:
+    container_name: s3.yoda
+    hostname: s3.yoda
+    image: ghcr.io/versity/versitygw:latest
+    command:
+      - "--port"
+      - ":9000"
+      - "--region"
+      - "local-s3"
+      - "posix"
+      - "--sidecar"
+      - "/data/.vgw-meta"
+      - "/data/buckets"
+    environment:
+      - ROOT_ACCESS_KEY_ID=${S3_ACCESS_KEY:-s3admin}
+      - ROOT_SECRET_ACCESS_KEY=${S3_SECRET_KEY:-s3secret}
+    ports:
+      - "9000:9000"
+    volumes:
+      - s3_data:/data
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /data/buckets /data/.vgw-meta && exec /usr/local/bin/versitygw \"$$@\"", "--"]
+    restart: unless-stopped
+
+  provider:
+    container_name: provider.yoda
+    platform: linux/amd64
+    hostname: provider.yoda
+    build:
+      context: ../..
+      dockerfile: docker/compose-s3/provider.Dockerfile
+    ports:
+      - "8247:1247"
+      - "20000-20199:20000-20199"
+    depends_on:
+      - s3
+      - db
+      - mailpit
+      - sram_mock
+      - datacite_mock
+    volumes:
+      - public_metadata:/public/var/www/moai/metadata
+      - public_landingpages:/public/var/www/landingpages
+    environment:
+      - TEST_USER_PASSWORD_HASH=${TEST_USER_PASSWORD_HASH}
+      - S3_ENDPOINT=http://s3.yoda:9000
+      - S3_BUCKET=yoda
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-s3admin}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-s3secret}
+      - S3_REGION=local-s3
+    restart: unless-stopped
+    shm_size: 512mb
+
+  db:
+    container_name: db.yoda
+    platform: linux/amd64
+    hostname: db.yoda
+    image: postgres:18
+    command: postgres -c standard_conforming_strings=off
+    environment:
+      - POSTGRES_DB=ICAT
+      - POSTGRES_USER=irodsdb
+      - POSTGRES_PASSWORD=yodadev
+    volumes:
+      - icat_pg_data:/var/lib/postgresql
+    restart: unless-stopped
+
+  extuserdb:
+    container_name: extuserdb.yoda
+    platform: linux/amd64
+    hostname: extuserdb.yoda
+    image: postgres:18
+    environment:
+      - POSTGRES_DB=extuser
+      - POSTGRES_USER=extuser
+      - POSTGRES_PASSWORD=yodadev
+    volumes:
+      - extuser_pg_data:/var/lib/postgresql
+    restart: unless-stopped
+
+  portal:
+    container_name: portal.yoda
+    platform: linux/amd64
+    hostname: portal.yoda
+    build:
+      context: ../..
+      dockerfile: docker/compose-s3/portal.Dockerfile
+    depends_on:
+      - provider
+      - eus
+    ports:
+      - "8443:443"
+    restart: unless-stopped
+
+  eus:
+    container_name: eus.yoda
+    platform: linux/amd64
+    hostname: eus.yoda
+    image: ghcr.io/utrechtuniversity/yoda-eus:development
+    depends_on:
+      - extuserdb
+      - mailpit
+    ports:
+      - "8444:8443"
+    restart: unless-stopped
+
+  public:
+    container_name: public.yoda
+    platform: linux/amd64
+    hostname: public.yoda
+    image: ghcr.io/utrechtuniversity/yoda-public:development
+    ports:
+      - "8446:443"
+    volumes:
+      - public_metadata:/var/www/moai/metadata
+      - public_landingpages:/var/www/landingpages
+    restart: unless-stopped
+
+  davrods:
+    container_name: data.yoda
+    platform: linux/amd64
+    hostname: data.yoda
+    image: ghcr.io/utrechtuniversity/davrods:development
+    depends_on:
+      - provider
+    ports:
+      - "8445:443"
+    restart: unless-stopped
+
+  mailpit:
+    container_name: mailpit.yoda
+    platform: linux/amd64
+    hostname: mailpit.yoda
+    image: ghcr.io/utrechtuniversity/yoda-mailpit:development
+    environment:
+      - TZ=Europe/Amsterdam
+    ports:
+      - "8025:8025"
+    restart: unless-stopped
+
+  datacite_mock:
+    container_name: datacite-mock.yoda
+    platform: linux/amd64
+    hostname: datacite-mock.yoda
+    image: ghcr.io/utrechtuniversity/yoda-web-mock:development
+    environment:
+      - MOCKNAME=datacite
+      - MOCKFQDN=datacite-mock.yoda
+    restart: unless-stopped
+
+  sram_mock:
+    container_name: sram-mock.yoda
+    platform: linux/amd64
+    hostname: sram-mock.yoda
+    image: ghcr.io/utrechtuniversity/yoda-web-mock:development
+    environment:
+      - MOCKNAME=sram
+      - MOCKFQDN=sram-mock.yoda
+    restart: unless-stopped

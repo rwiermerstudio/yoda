@@ -14,6 +14,7 @@
   when: |
     yoda_environment == "development"
     and not enable_nfs_resource
+    and item.resource_type == "unixfilesystem"
     and 'vault_path' in item
     and 'host' in item
     and item.host == (yoda_fqdn | default(ansible_facts['fqdn']))
@@ -30,6 +31,15 @@
     vault_path: "{{ item.vault_path | default('EMPTY_RESC_PATH') }}"
     children: "{{ item.children | default([]) }}"
     context: "{{ item.context | default('') }}"
-    modify: yoda_environment == "development"
+    modify: "{{ yoda_environment == 'development' or (irods_modify_resources | bool) }}"
   with_items: "{{ irods_resources }}"
   when: not ansible_check_mode
+
+
+- name: Remove unused local bootstrap Vault directory when no unixfilesystem resources exist
+  ansible.builtin.file:
+    path: "{{ irods_vault_directory }}"
+    state: absent
+  when: |
+    yoda_environment == "development"
+    and (irods_resources | selectattr('resource_type', 'equalto', 'unixfilesystem') | list | length) == 0

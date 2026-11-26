@@ -265,6 +265,8 @@
       value: "{{ irods_delay_server_sleep_time_in_seconds }}"
     - key: 'advanced_settings/number_of_concurrent_delay_rule_executors'
       value: "{{ irods_number_of_concurrent_delay_rule_executors }}"
+    - key: 'advanced_settings/checksum_read_buffer_size_in_bytes'
+      value: "{{ irods_checksum_read_buffer_size_in_bytes }}"
 
 
 - name: Ensure iRODS service account is owner of iRODS directories

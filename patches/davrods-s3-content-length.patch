@@ -1,0 +1,21 @@
+diff --git a/src/repo.c b/src/repo.c
+index fc05568..fff3563 100644
+--- a/src/repo.c
++++ b/src/repo.c
+@@ -803,6 +803,16 @@ static dav_error *dav_repo_open_stream(const dav_resource *resource,
+   WHISPER("Opening write stream to <%s> for resource <%s>\n",
+           stream->write_path, resource->uri);
+   open_params->oprType = PUT_OPR;
++  open_params->numThreads = 1;
++  if (mode == DAV_MODE_WRITE_TRUNC && resource->info && resource->info->r) {
++    const char *cl = apr_table_get(resource->info->r->headers_in, "Content-Length");
++    apr_off_t content_len = 0;
++    if (cl && apr_strtoff(&content_len, cl, NULL, 10) == APR_SUCCESS && content_len >= 0) {
++      open_params->dataSize = content_len;
++      addKeyVal(&open_params->condInput, DATA_SIZE_KW, apr_off_t_toa(stream->pool, content_len));
++      addKeyVal(&open_params->condInput, NUM_THREADS_KW, "1");
++    }
++  }
+ 
+   if (strcmp(stream->write_path, resource->info->rods_path) == 0 &&
+       resource->exists) {
