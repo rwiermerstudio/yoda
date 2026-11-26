@@ -72,6 +72,7 @@
           /usr/local/bin/yoda-migrate
           --version "{{ yoda_ruleset_version | default('current', true) }}"
           {{ '--dry-run' if ansible_check_mode else '' }}
+      become: true
       become_user: "{{ yoda_irods_service_account }}"
       changed_when: false
       when:
