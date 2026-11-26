@@ -1,0 +1,154 @@
+--- a/policies_utils.py	2026-11-25 16:13:35.550714358 +0000
++++ b/policies_utils.py	2026-11-26 09:03:21.420536708 +0000
+@@ -47,80 +47,85 @@
+     return _is_safe_genquery_inp(genquery_inp.selectInp, genquery_inp.sqlCondInp.inx)
+ 
+ 
+-def _column_in_select_inp(selectInp: Set[int], columns: Set[int]) -> bool:
+-    selectedInpHash = ast.literal_eval(str(selectInp))
+-    selected_columns  = selectedInpHash.keys()
+-    for column in columns:
+-        if column in selected_columns:
+-            return True
+-    return False
+-
+-
+-def _column_in_cond_inp(sqlCondInp: Set[int], columns: Set[int]) -> bool:
+-    condition_columns = ast.literal_eval(str(sqlCondInp))
+-    for column in columns:
+-        if column in condition_columns:
+-            return True
+-    return False
++_DATAOBJECT_COLUMNS = frozenset({
++    COL_D_DATA_ID, COL_D_COLL_ID, COL_DATA_NAME, COL_DATA_REPL_NUM,
++    COL_DATA_VERSION, COL_DATA_TYPE_NAME, COL_DATA_SIZE,
++    COL_D_RESC_NAME, COL_D_DATA_PATH, COL_D_OWNER_NAME, COL_D_OWNER_ZONE,
++    COL_D_REPL_STATUS, COL_D_DATA_STATUS, COL_D_DATA_CHECKSUM,
++    COL_D_EXPIRY, COL_D_MAP_ID, COL_D_COMMENTS, COL_D_CREATE_TIME, COL_D_MODIFY_TIME,
++    COL_DATA_MODE, COL_D_RESC_HIER, COL_D_RESC_ID,
++})
++_COLLECTION_COLUMNS = frozenset({
++    COL_COLL_ID, COL_COLL_NAME, COL_COLL_PARENT_NAME,
++    COL_COLL_OWNER_NAME, COL_COLL_OWNER_ZONE,
++    COL_COLL_MAP_ID, COL_COLL_INHERITANCE, COL_COLL_COMMENTS,
++    COL_COLL_CREATE_TIME, COL_COLL_MODIFY_TIME,
++    COL_COLL_TYPE, COL_COLL_INFO1, COL_COLL_INFO2,
++})
++_RESOURCE_COLUMNS = frozenset({
++    COL_R_RESC_ID, COL_R_RESC_NAME, COL_R_ZONE_NAME, COL_R_TYPE_NAME, COL_R_CLASS_NAME,
++    COL_R_LOC, COL_R_VAULT_PATH, COL_R_FREE_SPACE, COL_R_RESC_INFO, COL_R_RESC_COMMENT,
++    COL_R_CREATE_TIME, COL_R_MODIFY_TIME, COL_R_RESC_STATUS,
++    COL_R_FREE_SPACE_TIME, COL_R_RESC_CHILDREN, COL_R_RESC_CONTEXT, COL_R_RESC_PARENT,
++    COL_R_RESC_PARENT_CONTEXT,
++})
++_USER_COLUMNS = frozenset({
++    COL_USER_ID, COL_USER_NAME, COL_USER_TYPE, COL_USER_ZONE,
++    COL_USER_INFO, COL_USER_COMMENT, COL_USER_CREATE_TIME, COL_USER_MODIFY_TIME,
++    COL_USER_GROUP_ID, COL_USER_GROUP_NAME,
++})
++
++_DATAOBJECT_AVU_COLUMNS = frozenset({COL_META_DATA_ATTR_NAME, COL_META_DATA_ATTR_VALUE, COL_META_DATA_ATTR_UNITS})
++_COLLECTION_AVU_COLUMNS = frozenset({COL_META_COLL_ATTR_NAME, COL_META_COLL_ATTR_VALUE, COL_META_COLL_ATTR_UNITS})
++_RESOURCE_AVU_COLUMNS = frozenset({COL_META_RESC_ATTR_NAME, COL_META_RESC_ATTR_VALUE, COL_META_RESC_ATTR_UNITS})
++_USER_AVU_COLUMNS = frozenset({COL_META_USER_ATTR_NAME, COL_META_USER_ATTR_VALUE, COL_META_USER_ATTR_UNITS})
++_ALL_AVU_COLUMNS = (
++    _DATAOBJECT_AVU_COLUMNS
++    | _COLLECTION_AVU_COLUMNS
++    | _RESOURCE_AVU_COLUMNS
++    | _USER_AVU_COLUMNS
++)
++
++
++def _extract_select_columns(selectInp: object) -> Set[int]:
++    if isinstance(selectInp, dict):
++        return set(selectInp.keys())
++    if hasattr(selectInp, "inx") and hasattr(selectInp, "len"):
++        return {selectInp.inx[i] for i in range(selectInp.len)}
++    return set(ast.literal_eval(str(selectInp)).keys())
++
++
++def _extract_cond_columns(sqlCondInp: object) -> Set[int]:
++    if isinstance(sqlCondInp, (list, tuple, set, frozenset)):
++        return set(sqlCondInp)
++    try:
++        return set(sqlCondInp)  # type: ignore[arg-type]
++    except TypeError:
++        return set(ast.literal_eval(str(sqlCondInp)))
+ 
+ 
+ def _is_safe_genquery_inp(selectInp: Set[int], sqlCondInp: Set[int]) -> bool:
+-    # Defines groups of GenQuery columns
+-    dataobject_columns = {COL_D_DATA_ID, COL_D_COLL_ID, COL_DATA_NAME, COL_DATA_REPL_NUM,
+-                          COL_DATA_VERSION, COL_DATA_TYPE_NAME, COL_DATA_SIZE,
+-                          COL_D_RESC_NAME, COL_D_DATA_PATH, COL_D_OWNER_NAME, COL_D_OWNER_ZONE,
+-                          COL_D_REPL_STATUS, COL_D_DATA_STATUS, COL_D_DATA_CHECKSUM,
+-                          COL_D_EXPIRY, COL_D_MAP_ID, COL_D_COMMENTS, COL_D_CREATE_TIME, COL_D_MODIFY_TIME,
+-                          COL_DATA_MODE, COL_D_RESC_HIER, COL_D_RESC_ID}
+-    collection_columns = {COL_COLL_ID, COL_COLL_NAME, COL_COLL_PARENT_NAME,
+-                          COL_COLL_OWNER_NAME, COL_COLL_OWNER_ZONE,
+-                          COL_COLL_MAP_ID, COL_COLL_INHERITANCE, COL_COLL_COMMENTS,
+-                          COL_COLL_CREATE_TIME, COL_COLL_MODIFY_TIME,
+-                          COL_COLL_TYPE, COL_COLL_INFO1, COL_COLL_INFO2}
+-    resource_columns   = {COL_R_RESC_ID, COL_R_RESC_NAME, COL_R_ZONE_NAME, COL_R_TYPE_NAME, COL_R_CLASS_NAME,
+-                          COL_R_LOC, COL_R_VAULT_PATH, COL_R_FREE_SPACE, COL_R_RESC_INFO, COL_R_RESC_COMMENT,
+-                          COL_R_CREATE_TIME, COL_R_MODIFY_TIME, COL_R_RESC_STATUS,
+-                          COL_R_FREE_SPACE_TIME, COL_R_RESC_CHILDREN, COL_R_RESC_CONTEXT, COL_R_RESC_PARENT,
+-                          COL_R_RESC_PARENT_CONTEXT}
+-    user_columns       = {COL_USER_ID, COL_USER_NAME, COL_USER_TYPE, COL_USER_ZONE,
+-                          COL_USER_INFO, COL_USER_COMMENT, COL_USER_CREATE_TIME, COL_USER_MODIFY_TIME,
+-                          COL_USER_GROUP_ID, COL_USER_GROUP_NAME}
+-
+-    dataobject_avu_columns = {COL_META_DATA_ATTR_NAME, COL_META_DATA_ATTR_VALUE, COL_META_DATA_ATTR_UNITS}
+-    collection_avu_columns = {COL_META_COLL_ATTR_NAME, COL_META_COLL_ATTR_VALUE, COL_META_COLL_ATTR_UNITS}
+-    resource_avu_columns = {COL_META_RESC_ATTR_NAME, COL_META_RESC_ATTR_VALUE, COL_META_RESC_ATTR_UNITS}
+-    user_avu_columns = {COL_META_USER_ATTR_NAME, COL_META_USER_ATTR_VALUE, COL_META_USER_ATTR_UNITS}
+-
+-    uses_dataobject_columns = (_column_in_select_inp(selectInp, dataobject_columns)
+-                               or _column_in_cond_inp(sqlCondInp, dataobject_columns))
+-    uses_collection_columns = (_column_in_select_inp(selectInp, collection_columns)
+-                               or _column_in_cond_inp(sqlCondInp, collection_columns))
+-    uses_resource_columns = (_column_in_select_inp(selectInp, resource_columns)
+-                             or _column_in_cond_inp(sqlCondInp, resource_columns))
+-    uses_user_columns = (_column_in_select_inp(selectInp, user_columns)
+-                         or _column_in_cond_inp(sqlCondInp, user_columns))
+-
+-    uses_dataobject_avu_columns = (_column_in_select_inp(selectInp, dataobject_avu_columns)
+-                                   or _column_in_cond_inp(sqlCondInp, dataobject_avu_columns))
+-    uses_collection_avu_columns = (_column_in_select_inp(selectInp, collection_avu_columns)
+-                                   or _column_in_cond_inp(sqlCondInp, collection_avu_columns))
+-    uses_resource_avu_columns = (_column_in_select_inp(selectInp, resource_avu_columns)
+-                                 or _column_in_cond_inp(sqlCondInp, resource_avu_columns))
+-    uses_user_avu_columns = (_column_in_select_inp(selectInp, user_avu_columns)
+-                             or _column_in_cond_inp(sqlCondInp, user_avu_columns))
++    used = _extract_select_columns(selectInp)
++    used.update(_extract_cond_columns(sqlCondInp))
+ 
+-    if uses_dataobject_avu_columns and not (uses_collection_columns or uses_dataobject_columns):
++    # Fast path: non-AVU queries cannot violate AVU-scoping rules.
++    if used.isdisjoint(_ALL_AVU_COLUMNS):
++        return True
++
++    if not used.isdisjoint(_DATAOBJECT_AVU_COLUMNS) and used.isdisjoint(_COLLECTION_COLUMNS) and used.isdisjoint(_DATAOBJECT_COLUMNS):
+         return False
+-    elif uses_collection_avu_columns and not uses_collection_columns:
++    if not used.isdisjoint(_COLLECTION_AVU_COLUMNS) and used.isdisjoint(_COLLECTION_COLUMNS):
+         return False
+-    elif uses_resource_avu_columns and not (uses_resource_columns
+-                                            or uses_collection_columns
+-                                            or uses_dataobject_columns):
++    if (
++        not used.isdisjoint(_RESOURCE_AVU_COLUMNS)
++        and used.isdisjoint(_RESOURCE_COLUMNS)
++        and used.isdisjoint(_COLLECTION_COLUMNS)
++        and used.isdisjoint(_DATAOBJECT_COLUMNS)
++    ):
+         return False
+-    elif uses_user_avu_columns and not uses_user_columns:
++    if not used.isdisjoint(_USER_AVU_COLUMNS) and used.isdisjoint(_USER_COLUMNS):
+         return False
+-    else:
+-        return True
++    return True
+ 
+ 
+ # Determine whether changes to data objects on a particular resource need
