@@ -19,12 +19,17 @@ RUN apt-get update && \
       python3.12-venv && \
     rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch "${YODA_PORTAL_REF}" "${YODA_PORTAL_REPO}" /src/yoda-portal && \
+RUN --mount=type=secret,id=extra_ca,target=/tmp/extra-ca.crt \
+    if [ -s /tmp/extra-ca.crt ]; then \
+      cp /tmp/extra-ca.crt /usr/local/share/ca-certificates/extra-ca.crt && update-ca-certificates; \
+    fi && \
+    git clone --depth 1 --branch "${YODA_PORTAL_REF}" "${YODA_PORTAL_REPO}" /src/yoda-portal && \
     rm -rf /src/yoda-portal/.git
 
 RUN python3 -m venv /opt/yoda/venv && \
     /opt/yoda/venv/bin/pip install --no-cache-dir --upgrade pip gunicorn && \
-    /opt/yoda/venv/bin/pip install --no-cache-dir -r /src/yoda-portal/requirements.txt
+    grep -vi '^mod-wsgi' /src/yoda-portal/requirements.txt > /tmp/portal-requirements.txt && \
+    /opt/yoda/venv/bin/pip install --no-cache-dir -r /tmp/portal-requirements.txt
 
 
 FROM ubuntu:24.04 AS runtime

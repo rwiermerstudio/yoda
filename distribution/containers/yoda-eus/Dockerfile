@@ -19,12 +19,17 @@ RUN apt-get update && \
       python3.12-venv && \
     rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch "${YODA_EUS_REF}" "${YODA_EUS_REPO}" /src/yoda-eus && \
+RUN --mount=type=secret,id=extra_ca,target=/tmp/extra-ca.crt \
+    if [ -s /tmp/extra-ca.crt ]; then \
+      cp /tmp/extra-ca.crt /usr/local/share/ca-certificates/extra-ca.crt && update-ca-certificates; \
+    fi && \
+    git clone --depth 1 --branch "${YODA_EUS_REF}" "${YODA_EUS_REPO}" /src/yoda-eus && \
     rm -rf /src/yoda-eus/.git
 
 RUN python3 -m venv /opt/yoda/venv && \
     /opt/yoda/venv/bin/pip install --no-cache-dir --upgrade pip gunicorn && \
-    /opt/yoda/venv/bin/pip install --no-cache-dir -r /src/yoda-eus/requirements.txt
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_YODA_EUS="${YODA_EUS_VERSION:-0.0.0.dev0}" \
+      /opt/yoda/venv/bin/pip install --no-cache-dir /src/yoda-eus
 
 
 FROM ubuntu:24.04 AS runtime

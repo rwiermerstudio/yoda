@@ -16,7 +16,8 @@ ENV DEBIAN_FRONTEND="noninteractive" \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update && \
+RUN --mount=type=secret,id=extra_ca,target=/tmp/extra-ca.crt \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
       apache2 \
       ca-certificates \
@@ -30,10 +31,16 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       "irods-runtime=${IRODS_VERSION}" \
       "irods-icommands=${IRODS_VERSION}" && \
+    if [ -s /tmp/extra-ca.crt ]; then \
+      cp /tmp/extra-ca.crt /usr/local/share/ca-certificates/extra-ca.crt && update-ca-certificates; \
+    fi && \
     curl -fsSL "https://github.com/UtrechtUniversity/davrods/releases/download/${DAVRODS_RELEASE}/${DAVRODS_DEB}" \
       -o "/tmp/${DAVRODS_DEB}" && \
     dpkg -i "/tmp/${DAVRODS_DEB}" && \
     rm -f "/tmp/${DAVRODS_DEB}" && \
+    if [ -f /usr/local/share/ca-certificates/extra-ca.crt ]; then \
+      rm -f /usr/local/share/ca-certificates/extra-ca.crt && update-ca-certificates --fresh; \
+    fi && \
     rm -rf /var/lib/apt/lists/*
 
 # Enable Apache modules required by DavRODS and disable default 000-default site
